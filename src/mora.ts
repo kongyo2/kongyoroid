@@ -302,6 +302,10 @@ const PAUSE_WEIGHTS: ReadonlyMap<string, number> = new Map<string, number>([
 
 const LONG_VOWEL_MARKS: ReadonlySet<string> = new Set(["ー", "−", "-", "~", "〜"]);
 
+export function isLongVowelMark(char: string): boolean {
+  return LONG_VOWEL_MARKS.has(char);
+}
+
 export function kanaToUnits(text: string, path: string = "$.text"): readonly KanaUnit[] {
   const chars = Array.from(toKatakana(text));
   const units: KanaUnit[] = [];
@@ -318,7 +322,7 @@ export function kanaToUnits(text: string, path: string = "$.text"): readonly Kan
       index += 1;
       continue;
     }
-    if (LONG_VOWEL_MARKS.has(char)) {
+    if (isLongVowelMark(char)) {
       const previous = units.at(-1);
       if (previous === undefined || previous.kind !== "mora" || previous.vowel === "cl" || previous.vowel === "pau") {
         unsupported(`${path}[${index}]`, "A long-vowel mark must follow a voiced mora.");

@@ -53,6 +53,7 @@ interface RequestSpec {
   readonly query?: Query;
   readonly body?: unknown;
   readonly accept?: string;
+  readonly idempotent?: boolean;
 }
 
 const RETRYABLE_STATUS: ReadonlySet<number> = new Set([408, 425, 429, 500, 502, 503, 504]);
@@ -259,7 +260,14 @@ export class VoicevoxClient {
       try {
         return await this.attempt(spec, options.signal);
       } catch (error) {
-        if (!(error instanceof KongyoroidError) || !error.retryable || attempt >= this.retries) throw error;
+        if (
+          !(error instanceof KongyoroidError) ||
+          !error.retryable ||
+          spec.idempotent === false ||
+          attempt >= this.retries
+        ) {
+          throw error;
+        }
         const hinted =
           typeof error.detail === "object" && error.detail !== null && "retryAfterMs" in error.detail
             ? Number(error.detail.retryAfterMs)
@@ -418,6 +426,7 @@ export class VoicevoxClient {
       {
         method: "POST",
         path: "user_dict_word",
+        idempotent: false,
         query: {
           surface: word.surface,
           pronunciation: word.pronunciation,

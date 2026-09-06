@@ -146,7 +146,7 @@ test("defaults are materialized and errors carry paths and hints", () => {
   const speech = parseRequest({ kind: "speech", text: " こんにちは " });
   assert.equal(speech.kind, "speech");
   if (speech.kind === "speech") {
-    assert.equal(speech.engine, "voicevox");
+    assert.equal(speech.engine, "formant");
     assert.equal(speech.speed, 1);
     assert.equal(speech.upspeak, true);
     assert.equal(speech.split, "sentence");
@@ -168,6 +168,17 @@ test("defaults are materialized and errors carry paths and hints", () => {
   assert.equal(failure(() => parseRequest({ kind: "speech", text: "   " })).path, "$.text");
   const long = Array.from({ length: 20 }, () => ({ key: 60, beats: 64, lyric: "ア" }));
   assert.equal(failure(() => parseRequest({ kind: "song", notes: long, tempo: 20 })).path, "$.notes");
+});
+
+test("a style reference implies the voicevox engine", () => {
+  const plain = parseRequest({ kind: "speech", text: "x" });
+  const withSpeaker = parseRequest({ kind: "speech", text: "x", speaker: 3 });
+  const explicit = parseRequest({ kind: "speech", text: "x", speaker: 3, engine: "formant" });
+  const song = parseRequest({ kind: "song", notes: [{ key: 60, beats: 1, lyric: "ア" }], singer: "ずんだもん" });
+  assert.equal(plain.engine, "formant");
+  assert.equal(withSpeaker.engine, "voicevox");
+  assert.equal(explicit.engine, "formant");
+  assert.equal(song.engine, "voicevox");
 });
 
 test("style references accept ids, numeric strings, and names", () => {
@@ -192,4 +203,9 @@ test("the batch schema references the request schema and capabilities carry the 
   assert.ok(isObject(pkg));
   assert.equal(pkg["version"], VERSION);
   assert.equal(CAPABILITIES["name"], "@kongyo2/kongyoroid");
+});
+
+test("kana is canonicalized before it is stored", () => {
+  const speech = parseRequest({ kind: "speech", text: "x", kana: "すーぱー'/いい'?" });
+  assert.equal(speech.kind === "speech" ? speech.kana : undefined, "スウパア'/イイ'？");
 });

@@ -17,7 +17,7 @@ import { isObject, keys, literal, object, string } from "./validate.ts";
 import { PACKAGE_NAME, VERSION } from "./version.ts";
 import type { DictionaryWordDraft } from "./voicevox/dictionary.ts";
 
-const HELP: string = `kongyoroid ${VERSION} — Japanese speech and singing for LLM agents (VOICEVOX + offline formant)
+const HELP: string = `kongyoroid ${VERSION} — Japanese speech and singing for LLM agents (built-in formant engine, optional VOICEVOX ENGINE)
 
 Usage: kongyoroid <command> [flags]
 
@@ -34,7 +34,8 @@ Usage: kongyoroid <command> [flags]
   capabilities                                                           Machine-readable feature descriptor
 
 Common flags
-  --engine voicevox|formant|auto   --endpoint URL   --timeout-ms N   --retries N   --cache-dir DIR
+  --engine formant|voicevox|auto   (default formant; a speaker/singer/teacher selects voicevox)
+  --endpoint URL   --timeout-ms N   --retries N   --cache-dir DIR
   -o, --output FILE|-   (default: kongyoroid-<kind>-<hash>.wav; "-" streams WAV to stdout, JSON to stderr)
   --force               replace an existing output file        --play    play the result after writing
 

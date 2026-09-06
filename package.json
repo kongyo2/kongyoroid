@@ -1,7 +1,7 @@
 {
   "name": "@kongyo2/kongyoroid",
   "version": "1.0.0",
-  "description": "Japanese speech and singing synthesis for LLM agents: a JSON-first CLI and a typed library over VOICEVOX ENGINE, with a deterministic offline formant engine.",
+  "description": "Japanese speech and singing synthesis for LLM agents: a JSON-first CLI and typed library with a built-in deterministic formant engine and an optional VOICEVOX ENGINE adapter.",
   "type": "module",
   "license": "MIT",
   "author": "kongyo2",

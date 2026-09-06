@@ -1,6 +1,6 @@
 import { invalid } from "./errors.ts";
 import { DEFAULT_SAMPLE_RATE, LIMITS, SAMPLE_RATE_RANGE } from "./limits.ts";
-import { parseKanaNotation } from "./notation.ts";
+import { formatKanaNotation, parseKanaNotation } from "./notation.ts";
 import { SONG_PROPERTIES, SPEECH_PROPERTIES } from "./schema.ts";
 import { MAX_NOTES, parseNotes, resolveNotes, scoreSeconds, transposeInput } from "./score.ts";
 import type {
@@ -45,8 +45,9 @@ function parseCommon(o: JsonObject): {
   readonly volume: number;
   readonly seed: number;
 } {
+  const implied: EngineSelector = has(o, "speaker") || has(o, "singer") || has(o, "teacher") ? "voicevox" : "formant";
   return {
-    engine: optional(o, "engine", "$", "voicevox", parseEngine),
+    engine: optional(o, "engine", "$", implied, parseEngine),
     sampleRate: has(o, "sampleRate") ? parseSampleRate(o["sampleRate"], "$.sampleRate") : undefined,
     volume: optional(o, "volume", "$", 1, (v, p) => number(v, p, 0, 3)),
     seed: optional(o, "seed", "$", 1, parseSeed),
@@ -57,8 +58,9 @@ export function parseSpeechRequest(o: JsonObject): ResolvedSpeech {
   keys(o, Object.keys(SPEECH_PROPERTIES), "$");
   const text = string(o["text"], "$.text", 1, LIMITS.textChars);
   if (text.trim().length === 0) invalid("$.text", "Text must not be blank.");
-  const kana = has(o, "kana") ? string(o["kana"], "$.kana", 1, LIMITS.kanaChars) : undefined;
-  if (kana !== undefined) parseKanaNotation(kana, "$.kana");
+  const kana = has(o, "kana")
+    ? formatKanaNotation(parseKanaNotation(string(o["kana"], "$.kana", 1, LIMITS.kanaChars), "$.kana"))
+    : undefined;
   return {
     kind: "speech",
     ...parseCommon(o),

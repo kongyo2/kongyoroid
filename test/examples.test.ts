@@ -3,7 +3,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { test } from "node:test";
 import { Ajv } from "ajv";
 import { parseJson, parseRequest } from "../src/request.ts";
-import { REQUEST_SCHEMA } from "../src/schema.ts";
+import { BATCH_JOB_SCHEMA, REQUEST_SCHEMA } from "../src/schema.ts";
 import { isObject } from "../src/validate.ts";
 
 const examples = new URL("../examples/", import.meta.url);
@@ -30,4 +30,12 @@ test("every batch example line is a valid job", async () => {
     assert.equal(validate(job["request"]), true, JSON.stringify(validate.errors));
     parseRequest(job["request"]);
   }
+});
+
+test("the batch schema validates whole jobs on its own", async () => {
+  const validateJob = new Ajv({ allErrors: true, strict: false }).compile(BATCH_JOB_SCHEMA);
+  const lines = (await readFile(new URL("batch.jsonl", examples), "utf8")).trim().split("\n");
+  for (const line of lines) assert.equal(validateJob(parseJson(line)), true, JSON.stringify(validateJob.errors));
+  assert.equal(validateJob({ id: "x", request: { kind: "speech" } }), false);
+  assert.equal(validateJob({ id: "bad id", request: { kind: "speech", text: "x" } }), false);
 });

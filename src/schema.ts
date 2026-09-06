@@ -16,10 +16,10 @@ const styleRef: JsonSchema = {
 
 const common: JsonSchema = {
   engine: {
-    enum: ["voicevox", "formant", "auto"],
-    default: "voicevox",
+    enum: ["formant", "voicevox", "auto"],
+    default: "formant",
     description:
-      "voicevox uses a running VOICEVOX ENGINE (high quality, Japanese text). formant is the built-in offline synthesizer (kana only, deterministic). auto picks voicevox when reachable, otherwise formant.",
+      "formant is the built-in engine: kana text or kana notation, deterministic, no external service. voicevox drives a running VOICEVOX ENGINE (character voices, kanji text, user dictionary) and is selected automatically when speaker, singer, or teacher is given. auto uses voicevox when the endpoint answers, otherwise formant.",
   },
   sampleRate: {
     type: "integer",
@@ -189,27 +189,33 @@ function variant(kind: "speech" | "song", properties: JsonSchema, required: read
   };
 }
 
-export const REQUEST_SCHEMA: JsonSchema = {
-  $schema: "http://json-schema.org/draft-07/schema#",
-  $id: "https://github.com/kongyo2/kongyoroid/schema/render-request.json",
+const REQUEST_BODY: JsonSchema = {
   title: "kongyoroid RenderRequest",
   description:
     "One speech (読み上げ) or song (歌唱) render. Unknown properties are rejected. Output is a mono PCM16 WAV.",
   oneOf: [variant("speech", SPEECH_PROPERTIES, ["text"]), variant("song", SONG_PROPERTIES, ["notes"])],
+};
+
+export const REQUEST_SCHEMA: JsonSchema = {
+  $schema: "http://json-schema.org/draft-07/schema#",
+  $id: "https://github.com/kongyo2/kongyoroid/schema/render-request.json",
+  ...REQUEST_BODY,
   $defs: { note: NOTE_SCHEMA, scoreText: SCORE_TEXT_SCHEMA },
 };
 
 export const BATCH_JOB_SCHEMA: JsonSchema = {
   $schema: "http://json-schema.org/draft-07/schema#",
+  $id: "https://github.com/kongyo2/kongyoroid/schema/batch-job.json",
   title: "kongyoroid BatchJob",
-  description: "One JSONL line for the batch command.",
+  description: "One JSONL line for the batch command. The request schema is embedded under $defs.request.",
   type: "object",
   additionalProperties: false,
   required: ["id", "request"],
   properties: {
     id: { type: "string", pattern: "^[A-Za-z0-9_-]{1,64}$", description: "Output file name stem, unique per batch." },
-    request: { $ref: REQUEST_SCHEMA["$id"] },
+    request: { $ref: "#/$defs/request" },
   },
+  $defs: { request: REQUEST_BODY, note: NOTE_SCHEMA, scoreText: SCORE_TEXT_SCHEMA },
 };
 
 export const CAPABILITIES: JsonSchema = {
@@ -217,18 +223,21 @@ export const CAPABILITIES: JsonSchema = {
   version: VERSION,
   description: "Japanese speech and singing synthesis for LLM agents.",
   output: { container: "wav", encoding: "pcm16", channels: 1, sampleRate: { default: 24000, ...SAMPLE_RATE_RANGE } },
+  defaultEngine: "formant",
   engines: {
+    formant: {
+      external: false,
+      speech:
+        "Kana text or kana notation (accent phrases, pauses, devoicing, questions); deterministic for a request and seed.",
+      song: "Score of one-mora notes with ties and rests; deterministic.",
+      maxSeconds: LIMITS.formantSeconds,
+    },
     voicevox: {
       external: true,
       endpoint: { default: "http://127.0.0.1:50021", env: ["KONGYOROID_ENDPOINT", "VOICEVOX_URL"] },
       speech: "Japanese text with kanji; readings adjustable via kana notation and the user dictionary.",
       song: "Score of one-mora notes rendered by a singing style; timing and pitch predicted by a teacher style.",
-      styles: "Discover with the voices command; select by id or by name.",
-    },
-    formant: {
-      external: false,
-      speech: "Kana text or kana notation; deterministic for a given request and seed.",
-      song: "Score of one-mora notes; deterministic.",
+      styles: "Discover with the voices command; select by id or by name. Giving a style selects this engine.",
     },
   },
   commands: [
@@ -257,6 +266,7 @@ export const CAPABILITIES: JsonSchema = {
     textChars: LIMITS.textChars,
     notes: LIMITS.notes,
     audioSeconds: LIMITS.audioSeconds,
+    formantSeconds: LIMITS.formantSeconds,
     inputBytes: LIMITS.inputBytes,
     batchLines: LIMITS.batchLines,
     concurrency: LIMITS.concurrency,

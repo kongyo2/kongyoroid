@@ -208,7 +208,17 @@ test("voices, reading, doctor, sing, and dict work against an engine endpoint", 
 });
 
 test("an unreachable engine exits 3 with a hint, and engine auto falls back", async () => {
-  const unreachable = await runCli(["speak", "-t", "あ", "-o", join(workdir, "down.wav"), "--retries", "0"]);
+  const unreachable = await runCli([
+    "speak",
+    "-t",
+    "あ",
+    "-o",
+    join(workdir, "down.wav"),
+    "--retries",
+    "0",
+    "--engine",
+    "voicevox",
+  ]);
   assert.equal(unreachable.code, 3);
   const error = lastJson(unreachable.stderr);
   assert.equal(pick(error, "error", "code"), "ENGINE_UNAVAILABLE");

@@ -1,3 +1,4 @@
+import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import { checkAbort, invalid } from "./errors.ts";
 import { LIMITS } from "./limits.ts";
 import type { Consonant, KanaUnit, Phoneme, UnvoicedVowel, Vowel } from "./mora.ts";
@@ -6,7 +7,7 @@ import type { AccentPhrase, NotationMora } from "./notation.ts";
 import { parseKanaNotation } from "./notation.ts";
 import { midiToHz } from "./pitch.ts";
 import type { OperationOptions, ResolvedRequest, ResolvedSong, ResolvedSpeech } from "./types.ts";
-import { encodeWav } from "./wav.ts";
+import { encodePcm16, wavHeader } from "./wav.ts";
 
 type TimbreKind = "vowel" | "nasal" | "stop" | "fricative" | "affricate" | "glide" | "flap" | "silence";
 
@@ -231,8 +232,12 @@ function finalize(
       rampOut: next === undefined || !isVoicedSustain(next.phoneme),
     });
   }
-  if (cursor > LIMITS.audioSeconds * sampleRate) {
-    invalid("$", `Audio would last ${(cursor / sampleRate).toFixed(1)} s; the limit is ${LIMITS.audioSeconds} s.`);
+  if (cursor > LIMITS.formantSeconds * sampleRate) {
+    invalid(
+      "$",
+      `Audio would last ${(cursor / sampleRate).toFixed(1)} s; the formant engine renders at most ${LIMITS.formantSeconds} s per request.`,
+      "Split the input into shorter requests, or use the voicevox engine.",
+    );
   }
   return { ...plan, segments, frames: cursor };
 }
@@ -309,7 +314,7 @@ export function planSpeech(request: ResolvedSpeech, sampleRate: number): Formant
       const slope = high ? 1.22 - (0.1 * moraIndex) / Math.max(1, count - 1) : 0.97;
       const targetHz = shapePitch(BASE_F0 * slope * declination, request.pitch, request.intonation);
       const last = moraIndex === count - 1;
-      const endHz = phrase.interrogative && last ? targetHz * 1.35 : targetHz * 0.985;
+      const endHz = request.upspeak && phrase.interrogative && last ? targetHz * 1.35 : targetHz * 0.985;
       const timbre = TIMBRES[mora.vowel];
       const consonant = mora.consonant;
       const consonantSeconds = consonant === null ? 0 : TIMBRES[consonant].duration / speed;
@@ -360,16 +365,19 @@ export function planSong(request: ResolvedSong, sampleRate: number): FormantPlan
   };
   const leadIn = notes[0]?.key === null ? 0 : request.leadIn;
   const durations = notes.map((note) => note.beats * secondsPerBeat);
-  const consonantOf = (index: number): { consonant: Consonant | null; seconds: number } => {
+  const consonantOf = (index: number): { consonant: Consonant | null; seconds: number; fromOwn: boolean } => {
     const note = notes[index];
-    if (note === undefined || note.key === null) return { consonant: null, seconds: 0 };
+    if (note === undefined || note.key === null) return { consonant: null, seconds: 0, fromOwn: false };
     const units = kanaToUnits(note.lyric, `$.notes[${index}].lyric`);
     const unit = units[0];
-    if (unit === undefined || unit.kind !== "mora" || unit.consonant === null) return { consonant: null, seconds: 0 };
+    if (unit === undefined || unit.kind !== "mora" || unit.consonant === null) {
+      return { consonant: null, seconds: 0, fromOwn: false };
+    }
     const nominal =
       TIMBRES[unit.consonant].duration + (PALATALIZED.has(unit.consonant) || LABIALIZED.has(unit.consonant) ? 0.03 : 0);
-    const available = index === 0 ? leadIn : (durations[index - 1] ?? 0) * 0.4;
-    return { consonant: unit.consonant, seconds: Math.min(nominal, available) };
+    const fromOwn = index === 0 && leadIn <= 0;
+    const available = index === 0 ? (fromOwn ? (durations[0] ?? 0) * 0.4 : leadIn) : (durations[index - 1] ?? 0) * 0.4;
+    return { consonant: unit.consonant, seconds: Math.min(nominal, available), fromOwn };
   };
   let previousHz = 0;
   const first = consonantOf(0);
@@ -380,6 +388,7 @@ export function planSong(request: ResolvedSong, sampleRate: number): FormantPlan
     const following = consonantOf(index + 1);
     if (note.key === null) {
       rest(Math.max(0, duration - following.seconds));
+      previousHz = 0;
       continue;
     }
     const hz = midiToHz(note.key);
@@ -393,7 +402,7 @@ export function planSong(request: ResolvedSong, sampleRate: number): FormantPlan
       for (const part of parts) if (part.phoneme === "y" || part.phoneme === "w") part.seconds = glideSeconds;
       drafts.push(...parts);
     }
-    const vowelSeconds = Math.max(0.01, duration - following.seconds);
+    const vowelSeconds = Math.max(0, duration - following.seconds - (own.fromOwn ? own.seconds : 0));
     const previous = drafts.at(-1);
     if (
       previous !== undefined &&
@@ -618,6 +627,15 @@ function levelGain(segment: Segment, block: Float32Array, sung: boolean): number
   return Math.min(2, Math.max(0.5, ratio ** (sung ? 0.85 : 0.5)));
 }
 
+function applyLevel(block: Float32Array, gain: number, previousGain: number, ramp: number, volume: number): void {
+  for (let i = 0; i < block.length; i++) {
+    const blend = i < ramp ? i / ramp : 1;
+    const g = previousGain + (gain - previousGain) * blend;
+    const value = (block[i] ?? 0) * g * volume;
+    block[i] = volume > 1 ? Math.tanh(value) : value;
+  }
+}
+
 export interface StreamOptions extends OperationOptions {}
 
 export function* renderChunks(plan: FormantPlan, options: StreamOptions = {}): Generator<Float32Array, void, void> {
@@ -630,15 +648,42 @@ export function* renderChunks(plan: FormantPlan, options: StreamOptions = {}): G
     const block = new Float32Array(segment.frames);
     renderer.fill(block);
     const gain = levelGain(segment, block, sung);
-    for (let i = 0; i < block.length; i++) {
-      const blend = i < ramp ? i / ramp : 1;
-      const g = previousGain + (gain - previousGain) * blend;
-      const value = (block[i] ?? 0) * g * plan.volume;
-      block[i] = plan.volume > 1 ? Math.tanh(value) : value;
-    }
+    applyLevel(block, gain, previousGain, ramp, plan.volume);
     previousGain = gain;
     yield block;
   }
+}
+
+export async function renderInto(
+  plan: FormantPlan,
+  sink: (block: Float32Array) => void,
+  options: StreamOptions = {},
+): Promise<void> {
+  const renderer = new FormantRenderer(plan);
+  const ramp = Math.max(1, Math.round(plan.sampleRate * 0.006));
+  const sung = plan.vibratoDepth > 0;
+  const step = Math.max(1024, Math.round(plan.sampleRate / 4));
+  let previousGain = 1;
+  const fillFrom = async (block: Float32Array, offset: number): Promise<void> => {
+    if (offset >= block.length) return;
+    renderer.fill(block.subarray(offset, Math.min(block.length, offset + step)));
+    await yieldToEventLoop();
+    checkAbort(options.signal);
+    return fillFrom(block, offset + step);
+  };
+  const next = async (index: number): Promise<void> => {
+    const segment = plan.segments[index];
+    if (segment === undefined) return;
+    checkAbort(options.signal);
+    const block = new Float32Array(segment.frames);
+    await fillFrom(block, 0);
+    const gain = levelGain(segment, block, sung);
+    applyLevel(block, gain, previousGain, ramp, plan.volume);
+    previousGain = gain;
+    sink(block);
+    return next(index + 1);
+  };
+  await next(0);
 }
 
 export function renderPlan(plan: FormantPlan, options: StreamOptions = {}): Float32Array {
@@ -651,14 +696,48 @@ export function renderPlan(plan: FormantPlan, options: StreamOptions = {}): Floa
   return pcm;
 }
 
+export function encodePlanSync(plan: FormantPlan, options: StreamOptions = {}): Uint8Array {
+  const out = new Uint8Array(44 + plan.frames * 2);
+  out.set(wavHeader(plan.frames, plan.sampleRate));
+  let offset = 44;
+  for (const chunk of renderChunks(plan, options)) {
+    encodePcm16(chunk, out, offset);
+    offset += chunk.length * 2;
+  }
+  return out;
+}
+
+export async function encodePlan(plan: FormantPlan, options: StreamOptions = {}): Promise<Uint8Array> {
+  const out = new Uint8Array(44 + plan.frames * 2);
+  out.set(wavHeader(plan.frames, plan.sampleRate));
+  let offset = 44;
+  await renderInto(
+    plan,
+    (chunk) => {
+      encodePcm16(chunk, out, offset);
+      offset += chunk.length * 2;
+    },
+    options,
+  );
+  return out;
+}
+
 export function planRequest(request: ResolvedRequest, sampleRate: number): FormantPlan {
   return request.kind === "speech" ? planSpeech(request, sampleRate) : planSong(request, sampleRate);
 }
 
-export function renderFormant(
+export function renderFormantSync(
   request: ResolvedRequest,
   sampleRate: number,
   options: OperationOptions = {},
 ): Uint8Array {
-  return encodeWav(renderPlan(planRequest(request, sampleRate), options), sampleRate);
+  return encodePlanSync(planRequest(request, sampleRate), options);
+}
+
+export async function renderFormant(
+  request: ResolvedRequest,
+  sampleRate: number,
+  options: OperationOptions = {},
+): Promise<Uint8Array> {
+  return encodePlan(planRequest(request, sampleRate), options);
 }

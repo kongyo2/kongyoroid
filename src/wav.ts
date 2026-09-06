@@ -69,7 +69,9 @@ export function inspectWav(bytes: Uint8Array): WavLayout {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (view.getUint32(0) !== RIFF || view.getUint32(8) !== WAVE) malformed("missing RIFF/WAVE signature");
   const declared = view.getUint32(4, true) + 8;
-  const end = Math.min(declared, bytes.byteLength);
+  if (declared > bytes.byteLength)
+    malformed(`RIFF declares ${declared} bytes but only ${bytes.byteLength} were received`);
+  const end = declared;
   let format = 0;
   let channels = 0;
   let rate = 0;
@@ -92,8 +94,9 @@ export function inspectWav(bytes: Uint8Array): WavLayout {
       if (format === 0xfffe && length >= 26) format = view.getUint16(start + 24, true);
     } else if (tag === DATA) {
       if (dataOffset >= 0) malformed("duplicate data chunk");
+      if (start + length > end) malformed(`data chunk declares ${length} bytes past the end of the file`);
       dataOffset = start;
-      dataLength = Math.min(length, bytes.byteLength - start);
+      dataLength = length;
     }
     position = start + length + (length % 2);
   }

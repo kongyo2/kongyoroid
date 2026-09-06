@@ -1,6 +1,6 @@
 import { invalid } from "./errors.ts";
 import type { Consonant, UnvoicedVowel, Vowel } from "./mora.ts";
-import { lookupMora, toKatakana } from "./mora.ts";
+import { isLongVowelMark, lookupMora, toKatakana, vowelToKana } from "./mora.ts";
 
 export interface NotationMora {
   readonly text: string;
@@ -49,6 +49,15 @@ function parsePhrase(phrase: string, path: string): Omit<AccentPhrase, "pause" |
       index += 1;
       continue;
     }
+    if (isLongVowelMark(char)) {
+      const previous = moras.at(-1);
+      if (previous === undefined || previous.vowel === "cl" || previous.vowel === "pau") {
+        invalid(path, `A long-vowel mark must follow a voiced mora: ${phrase}.`);
+      }
+      moras.push({ text: vowelToKana(previous.vowel), consonant: null, vowel: previous.vowel });
+      index += 1;
+      continue;
+    }
     const devoiced = char === UNVOICE;
     const start = devoiced ? index + 1 : index;
     const head = chars[start];
@@ -91,6 +100,7 @@ export function parseKanaNotation(text: string, path: string = "$.kana"): readon
     if (index < chars.length && char !== PHRASE && char !== PAUSE) continue;
     const phrasePath = `${path}[${phrases.length}]`;
     const raw = chars.slice(start, index).join("");
+    if (raw.length === 0 && index === chars.length && phrases.length > 0) break;
     if (raw.length === 0) invalid(phrasePath, `Accent phrase ${phrases.length + 1} is empty.`);
     start = index + 1;
     const interrogative = raw.includes("？");

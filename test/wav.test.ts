@@ -51,6 +51,7 @@ test("float32 WAV decodes and concatenation mixes formats", () => {
   const floatWav = new Uint8Array(44 + 8);
   floatWav.set(wavHeader(2, 16000));
   const view = new DataView(floatWav.buffer);
+  view.setUint32(4, 44, true);
   view.setUint16(20, 3, true);
   view.setUint16(32, 4, true);
   view.setUint16(34, 32, true);
@@ -70,4 +71,16 @@ test("float32 WAV decodes and concatenation mixes formats", () => {
     KongyoroidError,
   );
   assert.throws(() => concatWav([]), KongyoroidError);
+});
+
+test("truncated WAV payloads are rejected", () => {
+  const wav = encodeWav(new Float32Array(100), 8000);
+  assert.throws(
+    () => inspectWav(wav.subarray(0, wav.length - 10)),
+    (error: unknown) => error instanceof KongyoroidError && error.code === "ENGINE_PROTOCOL",
+  );
+  const overlong = new Uint8Array(wav);
+  new DataView(overlong.buffer).setUint32(40, 1000, true);
+  assert.throws(() => inspectWav(overlong), KongyoroidError);
+  assert.equal(inspectWav(wav).frames, 100);
 });

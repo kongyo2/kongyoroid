@@ -5,6 +5,7 @@ import { DiskCache, LayeredCache, MemoryCache, cacheKey } from "./cache.ts";
 import { Semaphore } from "./concurrency.ts";
 import type { ErrorData } from "./errors.ts";
 import { KongyoroidError, asKongyoroidError, checkAbort } from "./errors.ts";
+import { formatKanaNotation, parseKanaNotation } from "./notation.ts";
 import { renderFormant } from "./formant.ts";
 import { DEFAULT_SAMPLE_RATE, LIMITS } from "./limits.ts";
 import { parseRequest, parseStyleRef } from "./request.ts";
@@ -92,6 +93,14 @@ export interface Diagnosis {
 
 export type VoiceKind = "speech" | "song" | "all";
 
+const PROBE_RETRY_MS = 30_000;
+
+interface Probe {
+  readonly at: number;
+  result: EngineId | undefined;
+  promise: Promise<EngineId>;
+}
+
 interface CachedRender {
   readonly audio: Uint8Array;
   readonly kana: string | undefined;
@@ -131,7 +140,7 @@ export class Kongyoroid {
   public readonly styles: StyleCatalog;
   public readonly dictionary: Dictionary;
   private readonly defaults: {
-    readonly engine: EngineSelector;
+    readonly engine: EngineSelector | undefined;
     readonly speaker: StyleRef | undefined;
     readonly singer: StyleRef | undefined;
     readonly teacher: StyleRef | undefined;
@@ -140,14 +149,14 @@ export class Kongyoroid {
   private readonly cache: RenderCache;
   private readonly concurrency: number;
   private readonly probeTimeoutMs: number;
-  private probe: Promise<EngineId> | undefined;
+  private probe: Probe | undefined;
 
   public constructor(options: KongyoroidOptions = {}) {
     this.client = new VoicevoxClient(options);
     this.styles = new StyleCatalog(this.client);
     this.dictionary = new Dictionary(this.client);
     this.defaults = {
-      engine: options.engine ?? "voicevox",
+      engine: options.engine,
       speaker: options.speaker === undefined ? undefined : parseStyleRef(options.speaker, "$.speaker"),
       singer: options.singer === undefined ? undefined : parseStyleRef(options.singer, "$.singer"),
       teacher: options.teacher === undefined ? undefined : parseStyleRef(options.teacher, "$.teacher"),
@@ -166,7 +175,7 @@ export class Kongyoroid {
   public withDefaults(request: unknown): unknown {
     if (!isObject(request)) return request;
     const merged: JsonObject = { ...request };
-    if (merged["engine"] === undefined) merged["engine"] = this.defaults.engine;
+    if (merged["engine"] === undefined && this.defaults.engine !== undefined) merged["engine"] = this.defaults.engine;
     if (merged["kind"] === "speech" && merged["speaker"] === undefined && this.defaults.speaker !== undefined) {
       merged["speaker"] = this.defaults.speaker;
     }
@@ -180,19 +189,42 @@ export class Kongyoroid {
 
   public resolveEngine(selector: EngineSelector, options: OperationOptions = {}): Promise<EngineId> {
     if (selector !== "auto") return Promise.resolve(selector);
-    this.probe ??= this.client
-      .version({
-        signal:
-          options.signal === undefined
-            ? AbortSignal.timeout(this.probeTimeoutMs)
-            : AbortSignal.any([options.signal, AbortSignal.timeout(this.probeTimeoutMs)]),
-      })
-      .then((): EngineId => "voicevox")
-      .catch((error: unknown): EngineId => {
-        if (error instanceof KongyoroidError && error.code === "ABORTED") throw error;
+    const current = this.probe;
+    if (current !== undefined && !(current.result === "formant" && Date.now() - current.at > PROBE_RETRY_MS)) {
+      return current.promise;
+    }
+    const timeout = AbortSignal.timeout(this.probeTimeoutMs);
+    const signal = options.signal === undefined ? timeout : AbortSignal.any([options.signal, timeout]);
+    const probe: Probe = { at: Date.now(), result: undefined, promise: Promise.resolve("formant") };
+    probe.promise = this.client.version({ signal }).then(
+      (): EngineId => {
+        probe.result = "voicevox";
+        return "voicevox";
+      },
+      (error: unknown): EngineId => {
+        if (options.signal?.aborted === true) {
+          if (this.probe === probe) this.probe = undefined;
+          throw error;
+        }
+        probe.result = "formant";
         return "formant";
-      });
-    return this.probe;
+      },
+    );
+    this.probe = probe;
+    return probe.promise;
+  }
+
+  public async dictionaryDigest(options: OperationOptions = {}): Promise<string | undefined> {
+    try {
+      const words = await this.client.dictionary(options);
+      const rows = words
+        .map((word) => [word.uuid, word.surface, word.pronunciation, word.accentType, word.priority].join("\u0000"))
+        .sort();
+      return createHash("sha256").update(rows.join("\n")).digest("hex");
+    } catch (error) {
+      if (error instanceof KongyoroidError && error.code === "ABORTED") throw error;
+      return undefined;
+    }
   }
 
   public async resolveStyles(request: ResolvedRequest, options: OperationOptions = {}): Promise<RenderStyles> {
@@ -216,19 +248,23 @@ export class Kongyoroid {
     const engine = await this.resolveEngine(resolved.engine, options);
     const styles = engine === "voicevox" ? await this.resolveStyles(resolved, options) : {};
     const manifest = engine === "voicevox" ? await this.client.manifest(options) : undefined;
-    const key = cacheKey(
-      engine,
-      VERSION,
-      engine === "voicevox" ? [this.client.endpoint.origin, manifest?.version ?? "", styles] : [],
-      resolved,
-    );
-    const cached = unpackRender((await this.cache.get(key)) ?? new Uint8Array(0));
+    const dictionary = engine === "voicevox" && resolved.kind === "speech" ? await this.dictionaryDigest(options) : "";
+    const key =
+      dictionary === undefined
+        ? undefined
+        : cacheKey(
+            engine,
+            VERSION,
+            engine === "voicevox" ? [this.client.endpoint.origin, manifest?.version ?? "", styles, dictionary] : [],
+            resolved,
+          );
+    const cached = key === undefined ? undefined : unpackRender((await this.cache.get(key)) ?? new Uint8Array(0));
     const entry =
       cached ??
       (await this.semaphore.run(async (): Promise<CachedRender> => {
         checkAbort(options.signal);
         if (engine === "formant") {
-          const audio = renderFormant(resolved, resolved.sampleRate ?? DEFAULT_SAMPLE_RATE, options);
+          const audio = await renderFormant(resolved, resolved.sampleRate ?? DEFAULT_SAMPLE_RATE, options);
           return { audio, kana: resolved.kind === "speech" ? resolved.kana : undefined, chunks: 1 };
         }
         if (resolved.kind === "speech") {
@@ -248,7 +284,7 @@ export class Kongyoroid {
         const result = await synthesizeSong(this.client, resolved, singer, teacher, options);
         return { audio: result.audio, kana: undefined, chunks: 1 };
       }, options.signal));
-    if (cached === undefined) await this.cache.set(key, packRender(entry));
+    if (key !== undefined && cached === undefined) await this.cache.set(key, packRender(entry));
     return {
       audio: entry.audio,
       info: audioInfo(inspectWav(entry.audio)),
@@ -276,7 +312,12 @@ export class Kongyoroid {
     const phrases: readonly EngineAccentPhrase[] =
       options.kana === undefined
         ? (await this.client.audioQuery(text, speaker.id, options)).accent_phrases
-        : await this.client.accentPhrases(options.kana, speaker.id, true, options);
+        : await this.client.accentPhrases(
+            formatKanaNotation(parseKanaNotation(options.kana, "$.kana")),
+            speaker.id,
+            true,
+            options,
+          );
     return {
       kana: accentPhrasesToKana(phrases),
       speaker,

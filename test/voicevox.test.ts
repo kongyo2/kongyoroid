@@ -319,3 +319,17 @@ test("speaker initialization and kana validation endpoints are exposed", async (
   assert.equal(invalid.code, "ENGINE_REJECTED");
   assert.equal(engine.requests.find((r) => r.path === "initialize_speaker")?.query["skip_reinit"], "true");
 });
+
+test("kana notation is canonicalized before it reaches the engine", async () => {
+  const request = parseSpeechRequest({ kind: "speech", text: "x", kana: "すーぱー'" });
+  await synthesizeSpeech(client, request, await catalog.resolve(3, "speaker"));
+  const accent = engine.requests.find((r) => r.path === "accent_phrases");
+  assert.equal(accent?.query["text"], "スウパア'");
+});
+
+test("dictionary creation is never retried", async () => {
+  engine.failNext(503, 1, "user_dict_word");
+  const error = await failure(client.addDictionaryWord({ surface: "x", pronunciation: "エックス", accentType: 0 }));
+  assert.equal(error.code, "ENGINE_HTTP");
+  assert.equal(engine.count("user_dict_word"), 1);
+});

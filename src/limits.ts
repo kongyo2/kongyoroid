@@ -3,6 +3,7 @@ export const LIMITS: {
   readonly kanaChars: number;
   readonly notes: number;
   readonly audioSeconds: number;
+  readonly formantSeconds: number;
   readonly inputBytes: number;
   readonly batchLines: number;
   readonly concurrency: number;
@@ -13,6 +14,7 @@ export const LIMITS: {
   kanaChars: 20_000,
   notes: 4096,
   audioSeconds: 3600,
+  formantSeconds: 1200,
   inputBytes: 8 * 1024 * 1024,
   batchLines: 10_000,
   concurrency: 16,

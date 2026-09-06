@@ -44,7 +44,7 @@ export type {
   StyleType,
   VoiceStyle,
 } from "./types.ts";
-export { MORA_TABLE, kanaToMoras, kanaToUnits, lookupMora, toKatakana, vowelToKana } from "./mora.ts";
+export { MORA_TABLE, isLongVowelMark, kanaToMoras, kanaToUnits, lookupMora, toKatakana, vowelToKana } from "./mora.ts";
 export type { Consonant, KanaUnit, MoraPhonemes, Phoneme, UnvoicedVowel, Vowel } from "./mora.ts";
 export { formatKanaNotation, parseKanaNotation } from "./notation.ts";
 export type { AccentPhrase, NotationMora } from "./notation.ts";
@@ -74,7 +74,18 @@ export {
   wavHeader,
 } from "./wav.ts";
 export type { WavLayout } from "./wav.ts";
-export { planRequest, planSong, planSpeech, renderChunks, renderFormant, renderPlan } from "./formant.ts";
+export {
+  encodePlan,
+  encodePlanSync,
+  planRequest,
+  planSong,
+  planSpeech,
+  renderChunks,
+  renderFormant,
+  renderFormantSync,
+  renderInto,
+  renderPlan,
+} from "./formant.ts";
 export type { FormantPlan, Segment, StreamOptions } from "./formant.ts";
 export { DiskCache, LayeredCache, MemoryCache, cacheKey } from "./cache.ts";
 export type { RenderCache } from "./cache.ts";

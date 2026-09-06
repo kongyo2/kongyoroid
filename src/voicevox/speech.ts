@@ -25,10 +25,8 @@ export function querySeconds(query: AudioQuery): number {
     const moras = phrase.pause_mora === null ? phrase.moras : [...phrase.moras, phrase.pause_mora];
     for (const mora of moras) {
       const pause = mora.vowel === "pau";
-      const vowel =
-        pause && query.pauseLength !== null
-          ? query.pauseLength
-          : mora.vowel_length * (pause ? query.pauseLengthScale : 1);
+      const base = pause && query.pauseLength !== null ? query.pauseLength : mora.vowel_length;
+      const vowel = pause ? base * query.pauseLengthScale : base;
       seconds += (vowel + (mora.consonant_length ?? 0)) / query.speedScale;
     }
   }
@@ -116,19 +114,17 @@ export async function synthesizeSpeech(
 
 function chunkKana(query: AudioQuery): string {
   if (query.kana.length > 0) return query.kana;
-  return query.accent_phrases
-    .map((phrase) => {
-      let text = "";
-      for (const [index, mora] of phrase.moras.entries()) {
-        if (/^[AIUEO]$/u.test(mora.vowel)) text += "_";
-        text += mora.text;
-        if (index + 1 === phrase.accent) text += "'";
-      }
-      if (phrase.is_interrogative) text += "？";
-      return text + (phrase.pause_mora === null ? "" : "、");
-    })
-    .join("/")
-    .replaceAll("、/", "、");
+  let text = "";
+  for (const [phraseIndex, phrase] of query.accent_phrases.entries()) {
+    for (const [index, mora] of phrase.moras.entries()) {
+      if (/^[AIUEO]$/u.test(mora.vowel)) text += "_";
+      text += mora.text;
+      if (index + 1 === phrase.accent) text += "'";
+    }
+    if (phrase.is_interrogative) text += "？";
+    if (phraseIndex < query.accent_phrases.length - 1) text += phrase.pause_mora === null ? "/" : "、";
+  }
+  return text;
 }
 
 export function accentPhrasesToKana(phrases: readonly EngineAccentPhrase[]): string {

@@ -6,16 +6,17 @@
 
 | Situation | Engine | Notes |
 | --- | --- | --- |
-| VOICEVOX ENGINE is running (default `http://127.0.0.1:50021`) | `voicevox` (default) | Real voices, kanji text, accent control, user dictionary. |
-| No engine available, tests, CI, offline | `formant` | Built-in synthetic voice. Kana input only. Deterministic. |
-| Unknown | `auto` | Probes the endpoint once; falls back to `formant`. The result JSON reports `engine`. |
+| Default | `formant` | Built-in engine: kana text or kana notation, deterministic, no external service. |
+| Character voices, kanji text, readings, user dictionary | `voicevox` | Needs a running VOICEVOX ENGINE (default `http://127.0.0.1:50021`). Selected automatically when `speaker`, `singer`, or `teacher` is given, or with `engine: "voicevox"`. |
+| Either | `auto` | Uses voicevox when the endpoint answers within 3 s, otherwise formant; a negative probe is retried after 30 s. The result JSON reports `engine`. |
 
 Check the engine with `kongyoroid doctor` (exit 0 when reachable, 3 otherwise). Start VOICEVOX with the desktop app or `docker run --rm -p 127.0.0.1:50021:50021 voicevox/voicevox_engine:cpu-latest`.
 
 ## Commands
 
 ```
-kongyoroid speak --text "こんにちは" --speaker ずんだもん -o hello.wav
+kongyoroid speak --text "こんにちは" -o hello.wav                 # built-in formant engine
+kongyoroid speak --text "こんにちは" --speaker ずんだもん -o zunda.wav  # VOICEVOX (a style selects it)
 kongyoroid sing --lyrics "ドレミ" --melody "C4 D4 E4" --beats "1 1 2" -o scale.wav
 kongyoroid render --input request.json -o out.wav        # any JSON request; "-" reads stdin
 kongyoroid batch --input jobs.jsonl --output-dir out      # {"id":"a","request":{...}} per line
@@ -60,7 +61,7 @@ Rules that VOICEVOX enforces and kongyoroid checks before calling the engine:
 ## Controlling readings (VOICEVOX)
 
 1. `kongyoroid reading --text "橋の端"` returns the engine's reading, e.g. `ハシノ'/ハシ'`.
-2. Fix it with `kana` notation: katakana, `/` between accent phrases, `、` for a pause, `'` after the accent nucleus, `_` before a devoiced vowel, `？` for a question. `kongyoroid speak --text "橋の端" --kana "ハシノ'/ハシ'"`.
+2. Fix it with `kana` notation: katakana, `/` between accent phrases, `、` for a pause, `'` after the accent nucleus, `_` before a devoiced vowel, `？` for a question. `kongyoroid speak --text "橋の端" --kana "ハシノ'/ハシ'"`. Hiragana and long-vowel marks are accepted and normalized (`すーぱー'` becomes `スウパア'`) before the engine sees them.
 3. Make it permanent with the user dictionary: `kongyoroid dict add --surface 端 --pronunciation ハシ --accent 1 --word-type COMMON_NOUN`.
 
 ## Library
@@ -75,7 +76,7 @@ const reading = await agent.reading("橋の端");           // { kana, phrases, 
 const styles = await agent.voices("song");
 ```
 
-`render(request: unknown)` validates untrusted JSON and throws `KongyoroidError` with `code`, `path`, `hint`, `retryable`. Pass `{ signal }` to cancel. Every method is safe to call concurrently; renders are limited by `concurrency` (default 2) and cached by request hash (memory, plus `cacheDir` on disk).
+`render(request: unknown)` validates untrusted JSON and throws `KongyoroidError` with `code`, `path`, `hint`, `retryable`. Pass `{ signal }` to cancel. Every method is safe to call concurrently; renders are limited by `concurrency` (default 2) and cached by request hash (memory, plus `cacheDir` on disk). Speech cache keys include a digest of the engine's user dictionary, so dictionary edits never serve stale audio.
 
 ## Environment variables
 
@@ -83,4 +84,4 @@ const styles = await agent.voices("song");
 
 ## Limits
 
-Text up to 20000 characters per request (split into sentence chunks that are synthesized concurrently), 4096 notes per score, 3600 seconds of audio per render, 8 MiB of JSON input, 10000 lines per batch.
+Text up to 20000 characters per request (split into sentence chunks that are synthesized concurrently), 4096 notes per score, 3600 seconds of audio per render (1200 seconds for the formant engine, which encodes in memory), 8 MiB of JSON input, 10000 lines per batch.

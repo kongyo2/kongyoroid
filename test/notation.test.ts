@@ -52,3 +52,19 @@ test("rejects malformed notation with precise paths", () => {
   assert.equal(code(() => parseKanaNotation("_ン'")).message.includes("devoiced"), true);
   assert.equal(code(() => parseKanaNotation("")).code, "INVALID_INPUT");
 });
+
+test("long-vowel marks and trailing delimiters are accepted", () => {
+  const phrases = parseKanaNotation("スーパー'");
+  assert.deepEqual(
+    phrases[0]?.moras.map((m) => m.text),
+    ["ス", "ウ", "パ", "ア"],
+  );
+  assert.equal(formatKanaNotation(phrases), "スウパア'");
+  const trailingPause = parseKanaNotation("ア'、");
+  assert.equal(trailingPause.length, 1);
+  assert.equal(trailingPause[0]?.pause, true);
+  assert.equal(parseKanaNotation("ア'/").length, 1);
+  assert.throws(() => parseKanaNotation("ア'、、"), KongyoroidError);
+  assert.throws(() => parseKanaNotation("ー'"), KongyoroidError);
+  assert.throws(() => parseKanaNotation("ッー'"), KongyoroidError);
+});

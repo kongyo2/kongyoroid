@@ -2,10 +2,10 @@
 
 LLM エージェントが CLI やライブラリとして扱う前提で作った、日本語の**読み上げ**と**歌唱**のツールです。
 
-- **VOICEVOX ENGINE** を HTTP で駆動し、漢字混じりの文章の読み上げ、楽譜からの歌唱、読み（アクセント）の確認と修正、ユーザー辞書の管理までを一つの CLI と型付きライブラリで扱えます。
-- エンジンが無い環境（CI、テスト、オフライン）向けに、依存ゼロで決定的な**フォルマント合成エンジン**を内蔵しています。かな入力の読み上げと歌唱に対応します。
+- 本体は内蔵の**フォルマント合成エンジン**です。依存ゼロ・決定的で、かな入力と AquesTalk 風のアクセント記法による読み上げ、楽譜からの歌唱を、外部サービス無しにその場で行います。
+- **VOICEVOX ENGINE** を起動すれば、同じ CLI とライブラリから HTTP で駆動できます。キャラクター音声、漢字混じりの文章、読み（アクセント）の確認と修正、ユーザー辞書の管理まで扱えます。`speaker` / `singer` / `teacher` を指定すると自動的に voicevox エンジンが選ばれます。
 - 入出力は常に **1 行 1 JSON**。エラーも JSON で、`code` / `path` / `hint` と安定した終了コードを返します。
-- 長文は文単位に分割して並列合成し、順序を保って結合します。結果はリクエストのハッシュでキャッシュされます。
+- 長文は文単位に分割して並列合成し、順序を保って結合します。結果はリクエストのハッシュでキャッシュされます（読み上げはユーザー辞書の内容もキーに含むため、辞書を変えた後に古い音声が返ることはありません）。
 
 英語のエージェント向け要約は [AGENTS.md](./AGENTS.md) にあります。
 
@@ -27,21 +27,24 @@ kongyoroid doctor
 ## クイックスタート
 
 ```bash
-# エンジンの状態と利用できるスタイル
+# 内蔵エンジン（既定）で読み上げ・歌唱。かな、または AquesTalk 風記法で読みを指定します
+kongyoroid speak --text "こんにちは、せかい" -o hello.wav
+kongyoroid speak --text "はしのはし" --kana "ハシノ'/ハシ'" -o hashi.wav
+kongyoroid sing --lyrics "きらきらぼし" --melody "C4 C4 G4 G4 A4 A4 G4 ~" --beats "1 1 1 1 1 1 1 1" --tempo 100 -o twinkle.wav
+
+# VOICEVOX ENGINE の状態と利用できるスタイル
 kongyoroid doctor
 kongyoroid voices --kind speech
 kongyoroid voices --kind song
 
-# 読み上げ（スタイルは id でも名前でも指定できます）
-kongyoroid speak --text "こんにちは、今日はいい天気ですね？" --speaker ずんだもん -o hello.wav
+# VOICEVOX で読み上げ・歌唱（スタイルを指定すると voicevox エンジンが選ばれます。id でも名前でも可）
+kongyoroid speak --text "こんにちは、今日はいい天気ですね？" --speaker ずんだもん -o zundamon.wav
 kongyoroid speak --text "こんにちは" --speaker "四国めたん/あまあま" --speed 1.1 --intonation 1.3 -o metan.wav
+kongyoroid sing --lyrics "きらきらぼし" --melody "C4 C4 G4 G4 A4 A4 G4 ~" --singer ずんだもん --tempo 100 -o twinkle-vv.wav
 
-# 歌唱（歌詞 1 モーラ = 1 音符、R は休符、~ はタイ）
-kongyoroid sing --lyrics "きらきらぼし" --melody "C4 C4 G4 G4 A4 A4 G4 ~" --beats "1 1 1 1 1 1 1 1" --tempo 100 -o twinkle.wav
-
-# 読みの確認と修正
+# 読みの確認と修正（VOICEVOX）
 kongyoroid reading --text "橋の端で箸を使う"
-kongyoroid speak --text "橋の端で箸を使う" --kana "ハシノ'/ハシデ'/ハ'シオ/ツカ'ウ" -o hashi.wav
+kongyoroid speak --text "橋の端で箸を使う" --kana "ハシノ'/ハシデ'/ハ'シオ/ツカ'ウ" --engine voicevox -o hashi-vv.wav
 kongyoroid dict add --surface "端" --pronunciation "ハシ" --accent 1 --word-type COMMON_NOUN
 
 # JSON リクエスト、JSONL バッチ、再生
@@ -49,8 +52,8 @@ kongyoroid render --input examples/speech.json -o out.wav
 kongyoroid batch --input examples/batch.jsonl --output-dir out --concurrency 2
 kongyoroid play out.wav
 
-# エンジン無しで動かす
-kongyoroid speak --engine formant --text "おふらいんでも うごきます" -o offline.wav
+# エンジンを明示する
+kongyoroid speak --engine auto --text "こんにちは" -o auto.wav
 ```
 
 成功時は標準出力に 1 行の JSON、失敗時は標準エラー出力に 1 行の JSON が出ます。
@@ -87,7 +90,7 @@ kongyoroid speak --engine formant --text "おふらいんでも うごきます"
 | `schema` | リクエストの JSON Schema（`--kind batch` でバッチ行のスキーマ） |
 | `capabilities` | 対応機能・制限・環境変数・終了コードの機械可読な一覧 |
 
-共通フラグ: `--engine voicevox|formant|auto`, `--endpoint URL`, `--timeout-ms N`, `--retries N`, `--cache-dir DIR`, `--concurrency N`, `-o/--output`, `--force`, `--play`。
+共通フラグ: `--engine formant|voicevox|auto`（既定は formant。`speaker` / `singer` / `teacher` を指定すると voicevox）, `--endpoint URL`, `--timeout-ms N`, `--retries N`, `--cache-dir DIR`, `--concurrency N`, `-o/--output`, `--force`, `--play`。
 
 環境変数: `KONGYOROID_ENDPOINT`（別名 `VOICEVOX_URL`）, `KONGYOROID_ENGINE`, `KONGYOROID_SPEAKER`, `KONGYOROID_SINGER`, `KONGYOROID_TEACHER`, `KONGYOROID_CACHE_DIR`。フラグが環境変数より優先されます。
 
@@ -99,16 +102,16 @@ kongyoroid speak --engine formant --text "おふらいんでも うごきます"
 
 | プロパティ | 既定値 | 説明 |
 | --- | --- | --- |
-| `text` | 必須 | 読み上げる文章。voicevox は漢字可、formant はかなのみ |
+| `text` | 必須 | 読み上げる文章。formant はかな（と `kana` 記法）、voicevox は漢字混じりの文章も可 |
 | `kana` | なし | AquesTalk 風記法の読み。指定するとエンジンの読み推定を使わず、分割もしない |
-| `speaker` | エンジンの先頭スタイル | スタイル id、または `"ずんだもん"` / `"ずんだもん/あまあま"` |
+| `speaker` | voicevox の先頭スタイル | VOICEVOX のスタイル id、または `"ずんだもん"` / `"ずんだもん/あまあま"`。指定すると voicevox エンジンが選ばれる |
 | `speed` `pitch` `intonation` `volume` | 1 / 0 / 1 / 1 | VOICEVOX の speedScale / pitchScale / intonationScale / volumeScale と同じ意味 |
 | `prePause` `postPause` | 0.1 / 0.1 | 前後の無音（秒） |
-| `pauseLength` `pauseScale` | なし / 1 | 句読点の無音の絶対値（秒）と倍率 |
+| `pauseLength` `pauseScale` | なし / 1 | 句読点の無音の絶対値（秒）と倍率。VOICEVOX と同じく、倍率は絶対値を指定した場合にもその後から掛かる |
 | `upspeak` | true | 疑問文の語尾上げ |
 | `split` | `"sentence"` | 分割単位: `sentence`（。！？と改行）/ `paragraph`（改行のみ）/ `none` |
 | `sampleRate` | エンジン既定（24000） | 8000〜48000 |
-| `engine` `seed` | `"voicevox"` / 1 | `seed` は formant のノイズ用 |
+| `engine` `seed` | `"formant"`（`speaker` 指定時は `"voicevox"`）/ 1 | `seed` は formant のノイズ用 |
 
 ### 歌唱 `kind: "song"`
 
@@ -116,12 +119,12 @@ kongyoroid speak --engine formant --text "おふらいんでも うごきます"
 | --- | --- | --- |
 | `notes` | 必須 | 音符配列 `[{ "key": "C4", "beats": 1, "lyric": "ド" }, { "key": null, "beats": 1 }]` または楽譜テキスト `{ "lyrics", "melody", "beats" }` |
 | `tempo` | 120 | BPM |
-| `singer` | 先頭の歌唱スタイル | 声を出すスタイル（種類 `frame_decode` か `sing`） |
+| `singer` | voicevox の先頭歌唱スタイル | 声を出す VOICEVOX スタイル（種類 `frame_decode` か `sing`）。指定すると voicevox エンジンが選ばれる |
 | `teacher` | singer が `sing` なら同じ、そうでなければ先頭の `singing_teacher` | 音高とタイミングを予測するスタイル |
 | `transpose` | 0 | 全音符の移調（半音） |
 | `vibratoDepth` `vibratoRate` | voicevox 0 / formant 25、5.5 | ビブラート（セント、Hz） |
 | `leadIn` `leadOut` | 0.16 / 0.16 | 先頭・末尾に補う休符（秒）。VOICEVOX は先頭が休符である必要がある |
-| `volume` `sampleRate` `engine` `seed` | 1 / 既定 / voicevox / 1 | |
+| `volume` `sampleRate` `engine` `seed` | 1 / 既定 / formant（`singer` か `teacher` 指定時は voicevox）/ 1 | |
 
 楽譜テキストの規則:
 
@@ -135,7 +138,7 @@ VOICEVOX が 1 音符 1 モーラしか受け付けないため、複数モー�
 
 `reading` が返す `kana` と、`speak --kana` / `kana` プロパティは同じ記法です。
 
-- 読みはカタカナ（ひらがなも受け付けて変換します）
+- 読みはカタカナ（ひらがなと長音記号 ー も受け付け、`スウパア'` のような正規形に変換してからエンジンへ送ります）
 - `/` でアクセント句を区切り、`、` は無音つきの区切り
 - `'` をアクセント核の直後に置く。各アクセント句にちょうど 1 つ必要（平板は末尾に `'`）
 - `_` を置いた直後のモーラの母音を無声化
@@ -179,9 +182,9 @@ try {
 
 ## エンジンについて
 
-- **voicevox**: 品質と表現力はこちらです。VOICEVOX の各キャラクターには利用規約があり、生成音声の利用条件はキャラクターごとに異なります。`voices` に出るキャラクター名で公式サイトの規約を確認してください。
-- **formant**: 音源＋4 フォルマント共鳴器による合成で、VOICEVOX と同じモーラ表（187 モーラ）に対応します。同じリクエストと `seed` からは常に同じバイト列が生成されます。人間らしさは VOICEVOX に及びませんが、パイプラインの動作確認やオフラインの読み上げには十分です。
-- **auto**: 起動時に一度だけエンドポイントを確認し、到達できなければ formant に落ちます。結果の `engine` で判別できます。
+- **formant**（既定）: 音源と 4 フォルマント共鳴器による内蔵エンジンです。VOICEVOX と同じモーラ表（187 モーラ）と AquesTalk 風記法（アクセント核、ポーズ、無声化、疑問形）に対応し、歌唱ではタイ・休符・ビブラート・ポルタメントを扱います。外部サービス無しで動き、同じリクエストと `seed` からは常に同じバイト列が生成されます。メモリ内で符号化するため、1 リクエストあたり 1200 秒までです。
+- **voicevox**: `speaker` / `singer` / `teacher` を指定するか `--engine voicevox` で選びます。VOICEVOX の各キャラクターには利用規約があり、生成音声の利用条件はキャラクターごとに異なります。`voices` に出るキャラクター名で公式サイトの規約を確認してください。
+- **auto**: エンドポイントを確認し（3 秒でタイムアウト）、到達できなければ formant に落ちます。formant に落ちた場合は 30 秒後に再確認します。結果の `engine` で判別できます。
 
 ## 開発
 

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { after, before, beforeEach, test } from "node:test";
 import { KongyoroidError } from "../src/errors.ts";
 import { Kongyoroid } from "../src/kongyoroid.ts";
+import { parseKanaNotation } from "../src/notation.ts";
 import { MockEngine } from "./helpers/mock-engine.ts";
 
 const engine = new MockEngine();
@@ -42,7 +43,7 @@ test("speak resolves defaults, reports styles, and caches identical requests", a
 });
 
 test("sing resolves singer and teacher, using a sing-type style for both when possible", async () => {
-  const agent = new Kongyoroid({ endpoint: engine.url });
+  const agent = new Kongyoroid({ endpoint: engine.url, engine: "voicevox" });
   const result = await agent.sing({ notes: { lyrics: "ドレ", melody: "C4 D4" } });
   assert.equal(result.styles.singer?.id, 3001);
   assert.equal(result.styles.teacher?.id, 6000);
@@ -130,4 +131,42 @@ test("aborting a render rejects with ABORTED", async () => {
     agent.speak("あ", { signal: controller.signal }),
     (error: unknown) => error instanceof KongyoroidError && error.code === "ABORTED",
   );
+});
+
+test("changing the dictionary invalidates cached speech", async () => {
+  const agent = new Kongyoroid({ endpoint: engine.url, engine: "voicevox" });
+  const first = await agent.speak("辞書");
+  assert.equal((await agent.speak("辞書")).cached, true);
+  const uuid = await agent.dictionary.add({ surface: "辞書", pronunciation: "ジショ", accentType: 1 });
+  const afterAdd = await agent.speak("辞書");
+  assert.equal(afterAdd.cached, false);
+  await agent.dictionary.remove(uuid);
+  assert.equal((await agent.speak("辞書")).cached, true);
+  assert.equal(first.sha256, afterAdd.sha256);
+});
+
+test("a probe timeout falls back to formant and a cancelled probe is not sticky", async () => {
+  engine.delayMs = 400;
+  try {
+    const slow = new Kongyoroid({ endpoint: engine.url, engine: "auto", probeTimeoutMs: 100 });
+    assert.equal((await slow.speak("あ")).engine, "formant");
+    const cancelled = new Kongyoroid({ endpoint: engine.url, engine: "auto", probeTimeoutMs: 5000 });
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 20);
+    await assert.rejects(
+      cancelled.speak("あ", { signal: controller.signal }),
+      (error: unknown) => error instanceof KongyoroidError && error.code === "ABORTED",
+    );
+    engine.delayMs = 0;
+    assert.equal((await cancelled.speak("あ")).engine, "voicevox");
+  } finally {
+    engine.delayMs = 0;
+  }
+});
+
+test("readings round-trip through the notation parser", async () => {
+  const agent = new Kongyoroid({ endpoint: engine.url });
+  const reading = await agent.reading("こんにちは。");
+  assert.ok(!reading.kana.endsWith("、"));
+  assert.equal(parseKanaNotation(reading.kana).length, reading.phrases.length);
 });
