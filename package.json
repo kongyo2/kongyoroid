@@ -1,0 +1,86 @@
+{
+  "name": "@kongyo2/kongyoroid",
+  "version": "1.0.0",
+  "description": "Japanese speech and singing synthesis for LLM agents: a JSON-first CLI and typed library with a built-in deterministic formant engine and an optional VOICEVOX ENGINE adapter.",
+  "type": "module",
+  "license": "MIT",
+  "author": "kongyo2",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kongyo2/kongyoroid.git"
+  },
+  "homepage": "https://github.com/kongyo2/kongyoroid#readme",
+  "bugs": {
+    "url": "https://github.com/kongyo2/kongyoroid/issues"
+  },
+  "engines": {
+    "node": ">=22.4"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "kongyoroid": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "examples",
+    "AGENTS.md",
+    "LICENSE",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "keywords": [
+    "tts",
+    "text-to-speech",
+    "singing",
+    "singing-synthesis",
+    "voicevox",
+    "japanese",
+    "speech",
+    "agent",
+    "llm",
+    "cli",
+    "formant",
+    "kongyo2"
+  ],
+  "scripts": {
+    "clean": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc --pretty false",
+    "typecheck": "tsc --noEmit --pretty false",
+    "typecheck:test": "tsc -p tsconfig.test.json --pretty false",
+    "lint": "oxlint --deny-warnings --format agent",
+    "lint:fix": "oxlint --fix --deny-warnings --format agent",
+    "lint:typed": "oxlint --type-aware --type-check --deny-warnings --format agent",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "comments:check": "ts-comment-scanner --fail-on-comment src test scripts",
+    "test": "node --test --disable-warning=ExperimentalWarning \"test/**/*.test.ts\"",
+    "check": "npm run typecheck && npm run typecheck:test && npm run lint && npm run format:check && npm run comments:check && npm test",
+    "check:package": "attw --pack . --profile esm-only && publint --strict",
+    "verify:package": "node --disable-warning=ExperimentalWarning scripts/verify-package.ts",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "0.18.5",
+    "@kongyo2/ts-comment-scanner": "1.6.0",
+    "@types/node": "22.20.1",
+    "ajv": "8.20.0",
+    "oxlint": "1.81.0",
+    "oxlint-tsgolint": "7.0.2001",
+    "prettier": "3.9.6",
+    "publint": "0.3.24",
+    "typescript": "6.0.3"
+  }
+}

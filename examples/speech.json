@@ -1,0 +1,8 @@
+{
+  "kind": "speech",
+  "text": "こんにちは。今日はいい天気ですね？\n明日も晴れるといいな。",
+  "speaker": "ずんだもん/ノーマル",
+  "speed": 1.1,
+  "intonation": 1.2,
+  "split": "sentence"
+}
