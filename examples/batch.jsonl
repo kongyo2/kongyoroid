@@ -1,0 +1,4 @@
+{"id":"greeting","request":{"kind":"speech","text":"おはようございます。","speaker":"ずんだもん"}}
+{"id":"question","request":{"kind":"speech","text":"準備はできましたか？","speaker":"四国めたん","speed":0.9}}
+{"id":"scale","request":{"kind":"song","notes":{"lyrics":"ドレミファソラシド","melody":"C4 D4 E4 F4 G4 A4 B4 C5","beats":"1 1 1 1 1 1 1 2"}}}
+{"id":"offline","request":{"kind":"speech","engine":"formant","text":"おふらいんでも、うごきます。"}}

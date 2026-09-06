@@ -1,0 +1,8 @@
+node_modules/
+dist/
+build/
+coverage/
+*.tgz
+*.wav
+.DS_Store
+.kongyoroid-cache/

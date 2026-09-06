@@ -1,0 +1,24 @@
+{
+  "kind": "song",
+  "engine": "formant",
+  "tempo": 90,
+  "transpose": -2,
+  "vibratoDepth": 35,
+  "notes": [
+    { "key": null, "beats": 0.5, "lyric": "" },
+    { "key": "E4", "beats": 1, "lyric": "さ" },
+    { "key": "E4", "beats": 1, "lyric": "く" },
+    { "key": "F4", "beats": 2, "lyric": "ら" },
+    { "key": "E4", "beats": 1, "lyric": "さ" },
+    { "key": "E4", "beats": 1, "lyric": "く" },
+    { "key": "F4", "beats": 2, "lyric": "ら" },
+    { "key": "E4", "beats": 1, "lyric": "や" },
+    { "key": "F4", "beats": 1, "lyric": "よ" },
+    { "key": "G4", "beats": 1, "lyric": "い" },
+    { "key": "G4", "beats": 1, "lyric": "の" },
+    { "key": "F4", "beats": 1, "lyric": "そ" },
+    { "key": "E4", "beats": 1, "lyric": "ら" },
+    { "key": "D4", "beats": 2, "lyric": "わ" },
+    { "key": "D4", "beats": 2, "lyric": "ー" }
+  ]
+}
