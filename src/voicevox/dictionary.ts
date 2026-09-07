@@ -1,5 +1,5 @@
 import { invalid } from "../errors.ts";
-import { kanaToMoras, toKatakana } from "../mora.ts";
+import { kanaToMoras, toKatakana } from "../text/mora.ts";
 import type { OperationOptions } from "../types.ts";
 import { integer, literal, string } from "../validate.ts";
 import type { DictionaryWord, WordType } from "./api.ts";

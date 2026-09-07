@@ -1,5 +1,5 @@
-import { LIMITS } from "./limits.ts";
-import type { SplitMode } from "./types.ts";
+import { LIMITS } from "../limits.ts";
+import type { SplitMode } from "../types.ts";
 
 const SENTENCE_END: RegExp = /(?<=[。！？!?])/u;
 const CLAUSE_END: RegExp = /(?<=[、,])/u;

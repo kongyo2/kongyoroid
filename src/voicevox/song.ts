@@ -1,4 +1,4 @@
-import { engineScoreFrames, notesToEngineScore } from "../score.ts";
+import { engineScoreFrames, notesToEngineScore } from "../song/score.ts";
 import type { OperationOptions, ResolvedSong, StyleSelection } from "../types.ts";
 import { inspectWav } from "../wav.ts";
 import type { FrameAudioQuery } from "./api.ts";

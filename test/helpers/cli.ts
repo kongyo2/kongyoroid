@@ -52,6 +52,10 @@ export function list(value: unknown): readonly unknown[] {
 export function pick(value: unknown, ...keys: readonly string[]): unknown {
   let current: unknown = value;
   for (const key of keys) {
+    if (Array.isArray(current)) {
+      current = current[Number(key)];
+      continue;
+    }
     if (!isObject(current)) return undefined;
     current = current[key];
   }

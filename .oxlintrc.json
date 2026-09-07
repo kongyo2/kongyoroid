@@ -10,6 +10,7 @@
   },
   "rules": {
     "no-console": "off",
+    "no-await-in-loop": "off",
     "typescript/no-floating-promises": [
       "error",
       {

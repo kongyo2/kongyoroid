@@ -1,7 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { KongyoroidError, checkAbort, invalid } from "../errors.ts";
 import { LIMITS } from "../limits.ts";
-import type { EngineScore } from "../score.ts";
+import type { EngineScore } from "../song/score.ts";
 import type { OperationOptions, VoiceStyle } from "../types.ts";
 import { integer } from "../validate.ts";
 import type {

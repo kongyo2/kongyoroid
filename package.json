@@ -1,7 +1,7 @@
 {
   "name": "@kongyo2/kongyoroid",
-  "version": "1.0.0",
-  "description": "Japanese speech and singing synthesis for LLM agents: a JSON-first CLI and typed library with a built-in deterministic formant engine and an optional VOICEVOX ENGINE adapter.",
+  "version": "2.0.0",
+  "description": "Japanese speech and singing synthesis for LLM agents: a JSON-first CLI and typed library with a built-in deterministic formant engine, a dictionary-backed Japanese text frontend (jpreprocess), streaming output, and an optional VOICEVOX ENGINE adapter.",
   "type": "module",
   "license": "MIT",
   "author": "kongyo2",
@@ -14,7 +14,7 @@
     "url": "https://github.com/kongyo2/kongyoroid/issues"
   },
   "engines": {
-    "node": ">=22.4"
+    "node": ">=22.18"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -32,7 +32,9 @@
   "files": [
     "dist",
     "examples",
+    "docs",
     "AGENTS.md",
+    "CHANGELOG.md",
     "LICENSE",
     "README.md"
   ],
@@ -53,6 +55,9 @@
     "llm",
     "cli",
     "formant",
+    "jpreprocess",
+    "mml",
+    "streaming",
     "kongyo2"
   ],
   "scripts": {
@@ -71,6 +76,9 @@
     "check:package": "attw --pack . --profile esm-only && publint --strict",
     "verify:package": "node --disable-warning=ExperimentalWarning scripts/verify-package.ts",
     "prepack": "npm run build"
+  },
+  "dependencies": {
+    "kanji2koe-openjtalk": "0.1.0"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",

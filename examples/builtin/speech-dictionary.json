@@ -1,0 +1,9 @@
+{
+  "kind": "speech",
+  "text": "kongyoroidはLLMエージェント向けのCLIです。ずんだもんのように読み上げます。",
+  "dictionary": [
+    { "surface": "kongyoroid", "reading": "コンギョロイド", "accent": 0 },
+    { "surface": "ずんだもん", "reading": "ズンダモン", "accent": 1 }
+  ],
+  "voice": "soft"
+}

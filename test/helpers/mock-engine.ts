@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { KanaUnit } from "../../src/mora.ts";
-import { MORA_TABLE, kanaToUnits, toKatakana } from "../../src/mora.ts";
-import type { AccentPhrase } from "../../src/notation.ts";
-import { formatKanaNotation, parseKanaNotation } from "../../src/notation.ts";
-import { midiToHz } from "../../src/pitch.ts";
+import type { KanaUnit } from "../../src/text/mora.ts";
+import { MORA_TABLE, kanaToUnits, toKatakana, vowelToKana } from "../../src/text/mora.ts";
+import type { AccentPhrase } from "../../src/text/notation.ts";
+import { formatKanaNotation, parseKanaNotation } from "../../src/text/notation.ts";
+import { midiToHz } from "../../src/song/pitch.ts";
 import { isObject } from "../../src/validate.ts";
 import { encodeWav } from "../../src/wav.ts";
 
@@ -168,17 +168,24 @@ function analyze(text: string): AccentPhrase[] {
   try {
     units = kanaToUnits(text);
   } catch {
-    units = Array.from(text).map((char): KanaUnit =>
+    units = Array.from(text).map((char, index): KanaUnit =>
       /[、。！？!?,.]/u.test(char)
-        ? { kind: "pause", text: char, weight: 1 }
-        : { kind: "mora", text: "ア", consonant: null, vowel: "a" },
+        ? { kind: "pause", text: char, weight: 1, index }
+        : { kind: "mora", text: "ア", consonant: null, vowel: "a", index },
     );
   }
   const phrases: AccentPhrase[] = [];
   let moras: AccentPhrase["moras"][number][] = [];
   const flush = (pause: boolean, interrogative: boolean): void => {
     if (moras.length === 0) return;
-    phrases.push({ moras, accent: phrases.length === 0 ? 1 : moras.length, pause, interrogative });
+    phrases.push({
+      moras,
+      accent: phrases.length === 0 ? 1 : moras.length,
+      boundary: interrogative ? "question" : pause ? "pause" : "phrase",
+      pause,
+      interrogative,
+      exclamatory: false,
+    });
     moras = [];
   };
   for (const unit of units) {
@@ -186,7 +193,11 @@ function analyze(text: string): AccentPhrase[] {
       flush(true, unit.text === "?" || unit.text === "？");
       continue;
     }
-    moras.push({ text: unit.text, consonant: unit.consonant, vowel: unit.vowel });
+    moras.push({
+      text: unit.text === "ー" ? vowelToKana(unit.vowel) : unit.text,
+      consonant: unit.consonant,
+      vowel: unit.vowel,
+    });
     if (moras.length >= 6) flush(false, false);
   }
   flush(false, false);
@@ -203,7 +214,7 @@ function engineShape(phrase: AccentPhrase): unknown {
       vowel_length: 0.08,
       pitch: mora.vowel === "pau" || mora.vowel === "cl" ? 0 : 5.6,
     })),
-    accent: phrase.accent,
+    accent: phrase.accent === 0 ? phrase.moras.length : phrase.accent,
     pause_mora: phrase.pause
       ? { text: "、", consonant: null, consonant_length: null, vowel: "pau", vowel_length: 0.3, pitch: 0 }
       : null,
@@ -544,7 +555,12 @@ export class MockEngine {
         this.style(query);
         const q = asRecord(body, "query");
         const rate = asNumber(q["outputSamplingRate"], "outputSamplingRate");
-        const wav = tone(querySeconds(q), rate, 0.3 * Number(q["volumeScale"] ?? 1));
+        const wav = tone(
+          querySeconds(q),
+          rate,
+          0.3 * Number(q["volumeScale"] ?? 1),
+          220 * 2 ** Number(q["pitchScale"] ?? 0),
+        );
         return this.stereo ? stereoize(wav) : wav;
       }
       case "POST sing_frame_audio_query":
@@ -561,7 +577,7 @@ export class MockEngine {
         return true;
       case "POST validate_kana":
         try {
-          parseKanaNotation(query["text"] ?? "");
+          parseKanaNotation(query["text"] ?? "", "$.kana", { requireAccent: true });
           return true;
         } catch (error) {
           throw new HttpError(400, {
