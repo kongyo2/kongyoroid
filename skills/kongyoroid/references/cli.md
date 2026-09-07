@@ -109,7 +109,9 @@ kongyoroid speak (--text TEXT | --input FILE|-) [options]
 
 ### ストリーミング (`--stream`)
 
-`。！？` と改行で文に分け、文が確定するたびに合成する。次の文を先読みするので途切れない。文間ポーズは次の文の先頭に付き、`--post-pause` は最後に 1 回だけなので、一括合成と同じ尺になる。
+`。！？` と改行で文に分け、文が確定するたびに合成する。次の文を先読みするので途切れない。文間ポーズは次の文の先頭に付き、`--post-pause` は最後に 1 回だけ付く。
+
+ストリーミング出力はチャンクの切り方に依存せず実行ごとに決定的だが、**一括合成とはバイト単位で一致せず、尺もフレーム単位では一致しないことがある** (文ごとに計画が分かれ、雑音成分が作り直されるため)。一括合成の結果を正解として突き合わせる検証は成立しない。詳細は [library.md](library.md#ストリーミング)。
 
 | `--format` | 標準出力 |
 | --- | --- |
@@ -122,7 +124,7 @@ llm-agent run | kongyoroid speak --input - --stream --output - --format pcm \
   | aplay -f S16_LE -r 24000 -c 1
 ```
 
-NDJSON のイベント (実測):
+NDJSON のイベント:
 
 ```json
 {"type":"sentence","index":0,"text":"一つ目の文です。","kana":"_ヒトツ'メノ/ブ'ンデ_ス。","durationSeconds":1.289,"startSeconds":0,"warnings":[]}
@@ -206,7 +208,7 @@ kongyoroid plan (--input FILE|- | --text TEXT | --lyrics KANA --melody NOTES | -
 | `notes[]` | 歌唱のみ。下記 |
 | `warnings[]` `adjustments[]` | 助言と自動調整 |
 
-`notes[]` の各要素 (実測):
+`notes[]` の各要素:
 
 ```json
 {"id":"n2","index":1,"key":64,"hz":329.63,"lyric":"ー","startSeconds":0.66,"endSeconds":1.16,
@@ -268,7 +270,7 @@ kongyoroid inspect FILE.wav [--pitch-track] [--window-ms N]
  "pitch":{"medianHz":238,"minHz":187.1,"maxHz":257.2,"voicedRatio":0.667}}
 ```
 
-`finite: true` と `clipped: 0` は最低条件。`--pitch-track` で窓ごとの `{seconds, hz, clarity}` が付く。歌唱の音高確認に使える (実測: 持続した C4 は `medianHz` 261.4、理論値 261.63 に対し約 1.5 セント)。
+`finite: true` と `clipped: 0` は最低条件。`--pitch-track` で窓ごとの `{seconds, hz, clarity}` が付く。歌唱の音高確認に使える (持続した C4 は理論値 261.63 Hz に対し `medianHz` 261.4)。
 
 ## dict — ローカル辞書
 
@@ -297,7 +299,7 @@ kongyoroid dict <list|add|update|delete|check> [--dictionary FILE] [--dry-run]
 - `kongyoroid cache <stats|prune|clear> [--cache-dir DIR] [--max-bytes N] [--max-entries N] [--dry-run]` — `DIR/kongyoroid-cache/` の中だけを対象にする。無関係なファイルには触らない。
 - `kongyoroid play FILE.wav` — afplay / paplay / aplay / ffplay / play / PowerShell の順に試す。無ければ `PLAYER_UNAVAILABLE` (終了コード 4)。
 
-キャッシュキーはエンジン・パッケージ版・エンジン版・フロントエンド版・辞書ダイジェスト・正規化リクエストから作るので、更新後に古い音声が返ることはない。実測でキャッシュヒット時は 760 ms → 4.6 ms。
+キャッシュキーはエンジン・パッケージ版・エンジン版・フロントエンド版・辞書ダイジェスト・正規化リクエストから作るので、更新後に古い音声が返ることはない。キャッシュヒット時は 760 ms → 4.6 ms。
 
 ## 制限
 

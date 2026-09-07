@@ -72,7 +72,7 @@
 
 音符リストなら 1 音符に**最大 8 モーラ**まで載せられる (`"lyric": "きらぼし"`)。9 以上は `INVALID_INPUT` (`Lyric "…" has 9 moras; a note holds at most 8.`)。
 
-歌詞中の `ー` は継続として扱われる。実測: `あー` を `C4 D4` に載せると 2 番目の音符は `lyric: "ー"`, `continuation: "melisma"` になり、母音を再アタックせず高さだけ変える。
+歌詞中の `ー` は継続として扱われる。`あー` を `C4 D4` に載せると 2 番目の音符は `lyric: "ー"`, `continuation: "melisma"` になり、母音を再アタックせず高さだけ変える。
 
 ## タイ・メリスマ・再アタック
 
@@ -86,7 +86,7 @@
 
 **`sustainId` が同じ音符は 1 本の持続音**として鳴る。「あー」と伸ばしたいのに `sustainId` が増えているなら、意図せず切れている。逆に「ああ」と 2 回言わせたいのに `sustainId` が同じなら、`legato` が効きすぎている。
 
-実測 (`C4` の `あ` に `C4` の `あ` を続けた場合):
+`C4` の `あ` に `C4` の `あ` を続けた場合:
 
 | `articulation` | 2 音目の `articulation` / `sustainId` |
 | --- | --- |
@@ -105,7 +105,7 @@ hint: After a rest, start a new note with a lyric (for example the vowel of the 
 
 ## 子音の借用と圧縮
 
-母音を拍頭に乗せるため、子音は**前の休符や前の音符の末尾から借りる** (最大 40 %)。実測 (tempo 120、`あ` → `きゃ`):
+母音を拍頭に乗せるため、子音は**前の休符や前の音符の末尾から借りる** (最大 40 %)。tempo 120 で `あ` → `きゃ` と並べた場合:
 
 ```json
 {"id":"n1","lyric":"ア","startSeconds":0.16,"endSeconds":0.55,"vowelStartSeconds":0.16}
@@ -174,7 +174,7 @@ The score spans 1047–1047 Hz; voice deep is tuned for 45–600 Hz.
 
 ボイスの `f0Range` は [speech.md](speech.md#内蔵ボイス) と `kongyoroid voices --engine formant`。
 
-音高の精度は高い。実測で持続した C4 (理論値 261.63 Hz) の `inspect` 結果は `medianHz: 261.4` (約 1.5 セント差)。
+音高の精度は高い。持続した C4 (理論値 261.63 Hz) を `inspect` すると `medianHz: 261.4` — 約 1.5 セント差。
 
 ## MML
 
@@ -184,7 +184,7 @@ The score spans 1047–1047 Hz; voice deep is tuned for 45–600 Hz.
 t120 o4 l8 v110 c4. d n67 r4 e&e [きゃ]f
 ```
 
-実測での解釈: `c4.` = 付点四分音符 (0.75 秒 @120)、`n67` = MIDI 67 (G4)、`r4` = 四分休符、`e&e` = タイ (2 音目が `lyric: "ー"`, `continuation: "tie"`)、`[きゃ]f` = その音符の歌詞が `キャ`。`lyrics` を別に渡すと `[]` の無い音符に順に配られる。
+`c4.` = 付点四分音符 (0.75 秒 @120)、`n67` = MIDI 67 (G4)、`r4` = 四分休符、`e&e` = タイ (2 音目が `lyric: "ー"`, `continuation: "tie"`)、`[きゃ]f` = その音符の歌詞が `キャ`。`lyrics` を別に渡すと `[]` の無い音符に順に配られる。
 
 MML は「旋律が先にあって歌詞は後」という作り方に向く。歌詞を音符ごとに細かく制御したいなら音符リストのほうが読みやすい。
 
