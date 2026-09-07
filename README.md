@@ -5,7 +5,6 @@ LLM エージェントが CLI やライブラリとして扱う前提で作っ�
 - **内蔵エンジンが本体**です。外部サービスも GPU も不要で、`npm install` だけで漢字かな交じり文を読み、歌います。同じリクエストからは常にビット単位で同じ WAV が出ます。
 - **JSON で会話します。** 入力は JSON Schema 付きのリクエスト、出力は 1 行 1 JSON。失敗は構造化エラー (`code` / `path` / `hint` / `repairOptions`) と終了コードで返します。
 - **レンダリングの前に確認できます。** `validate` と `plan` が読み (アクセント付きかな)、音素、音符の時刻、推定尺、警告を返すので、エージェントは音声を書き出す前に直せます。
-- **VOICEVOX はおまけ**です。`--speaker` / `--singer` を指定した時だけ、起動済みの VOICEVOX ENGINE を使います。
 
 ## 要件とインストール
 
@@ -61,7 +60,7 @@ llm-agent run | kongyoroid speak --input - --stream --output - --format pcm | ap
 {"ok":false,"error":{"code":"NOTE_TOO_SHORT","message":"Note n1 (カ) leaves only 25 ms for 1 vowel(s); at least 30 ms are needed.","retryable":false,"path":"$.notes[0].beats","hint":"Give the note more beats, lower the tempo, or use fewer moras in the lyric.","detail":{"availableMs":25,"requiredMs":30,"noteId":"n1"},"repairOptions":[{"action":"increase-duration","description":"Give the note more beats or lower the tempo.","path":"$.notes[0].beats"},{"action":"use-vowel-continuation","description":"Move some moras to neighbouring notes or hold the previous vowel.","path":"$.notes[0].lyric"}]}}
 ```
 
-コマンドの完全な一覧と出力形式は [docs/cli.md](docs/cli.md)、エージェント用の短い運用ガイドは [AGENTS.md](AGENTS.md) にあります。
+コマンドの完全な一覧と出力形式は [docs/cli.md](docs/cli.md)にあります。
 
 ## テキストの読み方
 
@@ -107,7 +106,7 @@ llm-agent run | kongyoroid speak --input - --stream --output - --format pcm | ap
 | `sampleRate` (`--sample-rate`) | 24000 | 8000–48000 Hz |
 | `seed` (`--seed`) | 1 | ノイズ・揺らぎの種 |
 
-イントネーションは藤崎モデル (フレーズ指令 + アクセント指令) で生成し、文末の下降、疑問の上昇、感嘆の強調、段落末の長いポーズを付けます。詳細は [docs/dsp.md](docs/dsp.md)。
+イントネーションは藤崎モデル (フレーズ指令 + アクセント指令) で生成し、文末の下降、疑問の上昇、感嘆の強調、段落末の長いポーズを付けます。
 
 ## 歌唱
 
@@ -233,10 +232,7 @@ VOICEVOX ENGINE が起動していれば、`--speaker` / `--singer` / `--teacher
 
 ## ドキュメント
 
-- [AGENTS.md](AGENTS.md): エージェントの運用ガイドと、このリポジトリを編集する時の規約
 - [docs/cli.md](docs/cli.md): コマンドと出力形式のリファレンス
-- [docs/dsp.md](docs/dsp.md): 合成器の設計 (声門波、声道モデル、韻律、タイミング、決定性)
-- [CHANGELOG.md](CHANGELOG.md): 変更履歴 (2.0.0 は互換性のない変更を含みます)
 - `examples/`: 内蔵エンジン向け (`builtin/`)、VOICEVOX 向け (`voicevox/`)、バッチ (`batch.jsonl`) の実例
 
 ## ライセンス
