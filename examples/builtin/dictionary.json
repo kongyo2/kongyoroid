@@ -1,0 +1,7 @@
+{
+  "entries": [
+    { "id": "kongyoroid", "surface": "kongyoroid", "reading": "コンギョロイド", "accent": 0, "note": "product name" },
+    { "id": "zundamon", "surface": "ずんだもん", "reading": "ズンダモン", "accent": 1 },
+    { "id": "hashi-edge", "surface": "端", "reading": "ハシ", "accent": 0, "match": "anywhere", "priority": 3 }
+  ]
+}

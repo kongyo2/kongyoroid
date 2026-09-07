@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { splitText } from "../src/text.ts";
+import { splitText } from "../src/text/split.ts";
 
 test("splitText keeps sentence punctuation with its sentence", () => {
   assert.deepEqual(splitText("こんにちは。元気ですか？はい！\n\n次の段落", "sentence"), [

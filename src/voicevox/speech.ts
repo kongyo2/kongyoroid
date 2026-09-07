@@ -1,7 +1,7 @@
 import { mapConcurrent } from "../concurrency.ts";
 import { invalid } from "../errors.ts";
 import { LIMITS } from "../limits.ts";
-import { splitText } from "../text.ts";
+import { splitText } from "../text/split.ts";
 import type { OperationOptions, ResolvedSpeech, StyleSelection } from "../types.ts";
 import { concatWav, inspectWav } from "../wav.ts";
 import type { AudioQuery, EngineAccentPhrase } from "./api.ts";
@@ -17,6 +17,12 @@ export interface SpeechSynthesis {
 
 export interface SpeechOptions extends OperationOptions {
   readonly concurrency?: number;
+}
+
+export function semitonesToPitchScale(semitones: number, referenceHz: number = 200): number {
+  if (semitones === 0) return 0;
+  const ratio = 1 + (semitones * Math.LN2) / 12 / Math.log(referenceHz);
+  return Math.max(-1, Math.min(1, Math.log2(ratio)));
 }
 
 export function querySeconds(query: AudioQuery): number {
@@ -42,7 +48,7 @@ export function applySpeechSettings(
   return {
     accent_phrases: phrases,
     speedScale: request.speed,
-    pitchScale: request.pitch,
+    pitchScale: request.pitch ?? semitonesToPitchScale(request.pitchSemitones),
     intonationScale: request.intonation,
     volumeScale: request.volume,
     prePhonemeLength: request.prePause,

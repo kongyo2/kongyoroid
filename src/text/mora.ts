@@ -1,4 +1,4 @@
-import { unsupported } from "./errors.ts";
+import { unsupported } from "../errors.ts";
 
 export type Vowel = "a" | "i" | "u" | "e" | "o" | "N" | "cl" | "pau";
 export type UnvoicedVowel = "A" | "I" | "U" | "E" | "O";
@@ -85,6 +85,7 @@ const rows: readonly (readonly [string, Consonant | null, Vowel])[] = [
   ["フェ", "f", "e"],
   ["フィ", "f", "i"],
   ["ファ", "f", "a"],
+  ["フュ", "f", "u"],
   ["フ", "f", "u"],
   ["ピョ", "py", "o"],
   ["ピュ", "py", "u"],
@@ -223,7 +224,7 @@ const rows: readonly (readonly [string, Consonant | null, Vowel])[] = [
   ["ヂ", "j", "i"],
   ["グァ", "gw", "a"],
   ["クァ", "kw", "a"],
-  ["ヶ", "k", "e"],
+  ["ヶ", "k", "a"],
   ["ャ", "y", "a"],
   ["ォ", null, "o"],
   ["ェ", null, "e"],
@@ -263,11 +264,58 @@ export function vowelToKana(vowel: Vowel | UnvoicedVowel): string {
   }
 }
 
+export function isUnvoicedVowel(vowel: Vowel | UnvoicedVowel): vowel is UnvoicedVowel {
+  return vowel === "A" || vowel === "I" || vowel === "U" || vowel === "E" || vowel === "O";
+}
+
+export function voicedVowelOf(vowel: Vowel | UnvoicedVowel): Vowel {
+  switch (vowel) {
+    case "A":
+      return "a";
+    case "I":
+      return "i";
+    case "U":
+      return "u";
+    case "E":
+      return "e";
+    case "O":
+      return "o";
+    default:
+      return vowel;
+  }
+}
+
+export function devoicedVowelOf(vowel: Vowel): UnvoicedVowel | undefined {
+  switch (vowel) {
+    case "a":
+      return "A";
+    case "i":
+      return "I";
+    case "u":
+      return "U";
+    case "e":
+      return "E";
+    case "o":
+      return "O";
+    default:
+      return undefined;
+  }
+}
+
 export function toKatakana(text: string): string {
   let out = "";
   for (const char of text.normalize("NFKC")) {
     const code = char.codePointAt(0) ?? 0;
     out += code >= 0x3041 && code <= 0x3096 ? String.fromCodePoint(code + 0x60) : char;
+  }
+  return out;
+}
+
+export function toHiragana(text: string): string {
+  let out = "";
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0;
+    out += code >= 0x30a1 && code <= 0x30f6 ? String.fromCodePoint(code - 0x60) : char;
   }
   return out;
 }
@@ -282,8 +330,11 @@ export type KanaUnit =
       readonly text: string;
       readonly consonant: Consonant | null;
       readonly vowel: Vowel;
+      readonly index: number;
     }
-  | { readonly kind: "pause"; readonly text: string; readonly weight: number };
+  | { readonly kind: "pause"; readonly text: string; readonly weight: number; readonly index: number };
+
+export type MoraUnit = Extract<KanaUnit, { kind: "mora" }>;
 
 const PAUSE_WEIGHTS: ReadonlyMap<string, number> = new Map<string, number>([
   ["、", 1],
@@ -291,19 +342,40 @@ const PAUSE_WEIGHTS: ReadonlyMap<string, number> = new Map<string, number>([
   ["。", 2],
   [".", 2],
   ["!", 2],
+  ["！", 2],
   ["?", 2],
+  ["？", 2],
   [":", 1],
+  ["：", 1],
   [";", 1],
+  ["；", 1],
   ["…", 1.5],
   ["‥", 1],
   ["・", 0.5],
+  ["「", 0.5],
+  ["」", 0.5],
+  ["『", 0.5],
+  ["』", 0.5],
+  ["（", 0.5],
+  ["）", 0.5],
+  ["(", 0.5],
+  [")", 0.5],
   ["\n", 2],
 ]);
 
-const LONG_VOWEL_MARKS: ReadonlySet<string> = new Set(["ー", "−", "-", "~", "〜"]);
+const LONG_VOWEL_MARKS: ReadonlySet<string> = new Set(["ー", "−", "-", "~", "〜", "～", "―"]);
+export const LONG_VOWEL_TEXT: string = "ー";
 
 export function isLongVowelMark(char: string): boolean {
   return LONG_VOWEL_MARKS.has(char);
+}
+
+export function isPauseMark(char: string): boolean {
+  return PAUSE_WEIGHTS.has(char);
+}
+
+export function pauseWeightOf(char: string): number | undefined {
+  return PAUSE_WEIGHTS.get(char);
 }
 
 export function kanaToUnits(text: string, path: string = "$.text"): readonly KanaUnit[] {
@@ -314,7 +386,7 @@ export function kanaToUnits(text: string, path: string = "$.text"): readonly Kan
     const char = chars[index] ?? "";
     const pauseWeight = PAUSE_WEIGHTS.get(char);
     if (pauseWeight !== undefined) {
-      units.push({ kind: "pause", text: char, weight: pauseWeight });
+      units.push({ kind: "pause", text: char, weight: pauseWeight, index });
       index += 1;
       continue;
     }
@@ -325,16 +397,19 @@ export function kanaToUnits(text: string, path: string = "$.text"): readonly Kan
     if (isLongVowelMark(char)) {
       const previous = units.at(-1);
       if (previous === undefined || previous.kind !== "mora" || previous.vowel === "cl" || previous.vowel === "pau") {
-        unsupported(`${path}[${index}]`, "A long-vowel mark must follow a voiced mora.");
+        unsupported(`${path}[${index}]`, "A long-vowel mark must follow a voiced mora.", undefined, {
+          sourceSpan: { start: index, end: index + 1, unit: "unicode-code-point" },
+          surface: char,
+        });
       }
-      units.push({ kind: "mora", text: vowelToKana(previous.vowel), consonant: null, vowel: previous.vowel });
+      units.push({ kind: "mora", text: LONG_VOWEL_TEXT, consonant: null, vowel: previous.vowel, index });
       index += 1;
       continue;
     }
     const pair = char + (chars[index + 1] ?? "");
     const twoChar = chars.length > index + 1 ? table.get(pair) : undefined;
     if (twoChar !== undefined) {
-      units.push({ kind: "mora", text: pair, consonant: twoChar.consonant, vowel: twoChar.vowel });
+      units.push({ kind: "mora", text: pair, consonant: twoChar.consonant, vowel: twoChar.vowel, index });
       index += 2;
       continue;
     }
@@ -343,17 +418,31 @@ export function kanaToUnits(text: string, path: string = "$.text"): readonly Kan
       unsupported(
         `${path}[${index}]`,
         `Unsupported character ${JSON.stringify(char)}; only kana, long-vowel marks, and punctuation are accepted here.`,
-        "Use the voicevox engine for kanji text, or write the reading in hiragana or katakana.",
+        "Write the reading in hiragana or katakana, or pass ordinary Japanese as text so the frontend can read it.",
+        { sourceSpan: { start: index, end: index + 1, unit: "unicode-code-point" }, surface: char },
       );
     }
-    units.push({ kind: "mora", text: char, consonant: single.consonant, vowel: single.vowel });
+    units.push({ kind: "mora", text: char, consonant: single.consonant, vowel: single.vowel, index });
     index += 1;
   }
   return units;
 }
 
-export function kanaToMoras(text: string, path: string = "$.text"): readonly Extract<KanaUnit, { kind: "mora" }>[] {
-  const moras: Extract<KanaUnit, { kind: "mora" }>[] = [];
+export function kanaToMoras(text: string, path: string = "$.text"): readonly MoraUnit[] {
+  const moras: MoraUnit[] = [];
   for (const unit of kanaToUnits(text, path)) if (unit.kind === "mora") moras.push(unit);
   return moras;
+}
+
+export function isKanaOnly(text: string): boolean {
+  try {
+    kanaToUnits(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function countMoras(text: string): number {
+  return kanaToMoras(text).length;
 }

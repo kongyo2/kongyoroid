@@ -1,11 +1,12 @@
 import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 import { isObject } from "../src/validate.ts";
 
-const root = resolve(new URL("..", import.meta.url).pathname);
+const root = fileURLToPath(new URL("..", import.meta.url));
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 
 function run(command: string, args: readonly string[], cwd: string, input?: string): string {

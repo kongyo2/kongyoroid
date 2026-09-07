@@ -1,0 +1,25 @@
+{
+  "kind": "song",
+  "engine": "formant",
+  "voice": "male",
+  "tempo": 90,
+  "transpose": -2,
+  "vibratoDepth": 35,
+  "notes": [
+    { "key": null, "beats": 0.5 },
+    { "id": "sa1", "key": "E4", "beats": 1, "lyric": "さ" },
+    { "id": "ku1", "key": "E4", "beats": 1, "lyric": "く" },
+    { "id": "ra1", "key": "F4", "beats": 2, "lyric": "ら" },
+    { "id": "sa2", "key": "E4", "beats": 1, "lyric": "さ", "velocity": 110 },
+    { "id": "ku2", "key": "E4", "beats": 1, "lyric": "く" },
+    { "id": "ra2", "key": "F4", "beats": 2, "lyric": "ら" },
+    { "id": "ya", "key": "E4", "beats": 1, "lyric": "や" },
+    { "id": "yo", "key": "F4", "beats": 1, "lyric": "よ" },
+    { "id": "i", "key": "G4", "beats": 1, "lyric": "い" },
+    { "id": "no", "key": "G4", "beats": 1, "lyric": "の" },
+    { "id": "so", "key": "F4", "beats": 1, "lyric": "そ" },
+    { "id": "ra3", "key": "E4", "beats": 1, "lyric": "ら" },
+    { "id": "wa", "key": "D4", "beats": 2, "lyric": "わ" },
+    { "id": "wa-hold", "key": "D4", "beats": 2, "continuation": "tie", "vibrato": { "depthCents": 45 } }
+  ]
+}

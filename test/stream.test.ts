@@ -1,0 +1,113 @@
+import assert from "node:assert/strict";
+import { before, test } from "node:test";
+import { KongyoroidError } from "../src/errors.ts";
+import { parseRequest } from "../src/request.ts";
+import { compileRequest } from "../src/synth/engine.ts";
+import { renderPcm } from "../src/synth/renderer.ts";
+import { renderPcmStream, streamingWavHeader } from "../src/synth/stream.ts";
+import { synthesizeTextStream, takeSentences } from "../src/synth/textstream.ts";
+import { loadFrontend } from "../src/text/frontend.ts";
+import type { ResolvedSpeech } from "../src/types.ts";
+import { inspectWav } from "../src/wav.ts";
+import { maxAbsDiff } from "./helpers/audio.ts";
+
+before(async () => {
+  await loadFrontend();
+});
+
+function speech(request: Record<string, unknown>): ResolvedSpeech {
+  const parsed = parseRequest({ kind: "speech", ...request });
+  assert.ok(parsed.kind === "speech");
+  return parsed;
+}
+
+async function* chunks(parts: readonly string[], delayMs: number = 0): AsyncGenerator<string, void, void> {
+  for (const part of parts) {
+    if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+    yield part;
+  }
+}
+
+test("renderPcmStream produces the same samples as a whole render, in order", async () => {
+  const compiled = await compileRequest(parseRequest({ kind: "speech", text: "て", kana: "テ'_スト。" }), 16000);
+  const whole = renderPcm(compiled.plan).pcm;
+  const joined = new Float32Array(compiled.plan.frames);
+  let offset = 0;
+  const iterator = renderPcmStream(compiled.plan, { blockFrames: 300 });
+  let stats;
+  while (true) {
+    const next = await iterator.next();
+    if (next.done) {
+      stats = next.value;
+      break;
+    }
+    assert.equal(next.value.start, offset);
+    joined.set(next.value.samples, offset);
+    offset += next.value.samples.length;
+  }
+  assert.equal(offset, compiled.plan.frames);
+  assert.equal(maxAbsDiff(whole, joined), 0);
+  assert.ok(stats !== undefined && stats.frames === compiled.plan.frames);
+});
+
+test("takeSentences cuts at terminals and at a length limit near a pause", () => {
+  assert.deepEqual(takeSentences("一。二？三", 100), { sentences: ["一。", "二？"], rest: "三" });
+  assert.deepEqual(takeSentences("改行で\n区切る", 100), { sentences: ["改行で\n"], rest: "区切る" });
+  const long = `${"あ".repeat(30)}、${"い".repeat(30)}`;
+  const taken = takeSentences(long, 40);
+  assert.equal(taken.sentences[0], `${"あ".repeat(30)}、`);
+  assert.equal(taken.rest, "い".repeat(30));
+});
+
+test("text streaming emits sentence events and audio in order as text arrives", async () => {
+  const request = speech({ text: "x" });
+  const events = synthesizeTextStream(chunks(["最初の文で", "す。次の文。", "最後"], 5), request, {
+    sampleRate: 16000,
+  });
+  const sentences: string[] = [];
+  let frames = 0;
+  let sequence = -1;
+  let end: { frames: number; sentences: number } | undefined;
+  for await (const event of events) {
+    if (event.type === "sentence") {
+      sentences.push(event.text);
+      assert.ok(event.kana.length > 0);
+      assert.equal(event.startFrame, frames);
+    } else if (event.type === "audio") {
+      assert.equal(event.sequence, sequence + 1);
+      sequence = event.sequence;
+      assert.equal(event.block.start, frames);
+      frames += event.block.samples.length;
+    } else {
+      end = { frames: event.frames, sentences: event.sentences };
+    }
+  }
+  assert.deepEqual(sentences, ["最初の文です。", "次の文。", "最後"]);
+  assert.deepEqual(end, { frames, sentences: 3 });
+  const header = streamingWavHeader(16000);
+  assert.equal(header.length, 44);
+  assert.equal(new DataView(header.buffer).getUint32(40, true), 0xffffffff);
+  assert.equal(
+    inspectWav(
+      new Uint8Array([...header.subarray(0, 4), 40, 0, 0, 0, ...header.subarray(8, 40), 4, 0, 0, 0, 0, 0, 0, 0]),
+    ).frames,
+    2,
+  );
+});
+
+test("text streaming stops with ABORTED when the signal fires", async () => {
+  const request = speech({ text: "x" });
+  const controller = new AbortController();
+  const events = synthesizeTextStream(chunks(["一。", "二。", "三。"], 1), request, {
+    sampleRate: 16000,
+    signal: controller.signal,
+  });
+  await assert.rejects(
+    (async () => {
+      for await (const event of events) {
+        if (event.type === "audio") controller.abort();
+      }
+    })(),
+    (error: unknown) => error instanceof KongyoroidError && error.code === "ABORTED",
+  );
+});

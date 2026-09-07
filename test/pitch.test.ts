@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { KongyoroidError } from "../src/errors.ts";
-import { midiToHz, midiToNoteName, noteToMidi } from "../src/pitch.ts";
+import { midiToHz, midiToNoteName, noteToMidi } from "../src/song/pitch.ts";
 
 test("note names convert to MIDI keys", () => {
   assert.equal(noteToMidi("C4"), 60);
@@ -16,6 +16,7 @@ test("note names convert to MIDI keys", () => {
   assert.equal(noteToMidi("G9"), 127);
   assert.equal(noteToMidi(72), 72);
   assert.equal(noteToMidi("Ｃ４"), 60);
+  assert.equal(noteToMidi("60"), 60);
 });
 
 test("invalid keys are rejected with the given path", () => {

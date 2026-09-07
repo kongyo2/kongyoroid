@@ -324,7 +324,7 @@ test("kana notation is canonicalized before it reaches the engine", async () => 
   const request = parseSpeechRequest({ kind: "speech", text: "x", kana: "すーぱー'" });
   await synthesizeSpeech(client, request, await catalog.resolve(3, "speaker"));
   const accent = engine.requests.find((r) => r.path === "accent_phrases");
-  assert.equal(accent?.query["text"], "スウパア'");
+  assert.equal(accent?.query["text"], "スーパー'");
 });
 
 test("dictionary creation is never retried", async () => {

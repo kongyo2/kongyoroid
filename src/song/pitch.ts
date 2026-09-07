@@ -1,4 +1,4 @@
-import { invalid } from "./errors.ts";
+import { invalid } from "../errors.ts";
 
 export const A4_HZ: number = 440;
 
