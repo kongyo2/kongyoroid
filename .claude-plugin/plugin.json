@@ -1,0 +1,13 @@
+{
+  "name": "kongyoroid-skills",
+  "description": "Agent skill for @kongyo2/kongyoroid — Japanese speech and singing synthesis with the built-in deterministic formant engine",
+  "version": "1.0.0",
+  "author": {
+    "name": "kongyo2"
+  },
+  "homepage": "https://github.com/kongyo2/kongyoroid#readme",
+  "repository": "https://github.com/kongyo2/kongyoroid",
+  "license": "MIT",
+  "keywords": ["kongyoroid", "tts", "text-to-speech", "singing-synthesis", "japanese", "formant", "wav"],
+  "skills": "./skills/"
+}

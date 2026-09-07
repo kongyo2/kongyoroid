@@ -235,6 +235,19 @@ VOICEVOX ENGINE が起動していれば、`--speaker` / `--singer` / `--teacher
 - [docs/cli.md](docs/cli.md): コマンドと出力形式のリファレンス
 - `examples/`: 内蔵エンジン向け (`builtin/`)、VOICEVOX 向け (`voicevox/`)、バッチ (`batch.jsonl`) の実例
 
+## エージェント向けスキル
+
+内蔵 formant エンジンでの制作手順をまとめた [Agent Skill](https://agentskills.io) を [`skills/kongyoroid/`](skills/kongyoroid/SKILL.md) に同梱しています。読みの検証、合成計画の点検、構造化エラーからの復旧、ストリーミングとバッチの使い分けを扱います。スクリプトは含まず、公式 CLI と ESM API をそのまま使います。
+
+Claude Code のプラグインとして導入する場合:
+
+```
+/plugin marketplace add kongyo2/kongyoroid
+/plugin install kongyoroid-skills@kongyoroid-skills
+```
+
+リポジトリを使わずに導入する場合は、`skills/kongyoroid/` をプロジェクトの `.claude/skills/` か `~/.claude/skills/` にコピーするか、シンボリックリンクを張ってください。npm から入れたパッケージにも `node_modules/@kongyo2/kongyoroid/skills/` として同梱されます。
+
 ## ライセンス
 
 MIT
