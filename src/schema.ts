@@ -282,7 +282,7 @@ export const MML_SCORE_SCHEMA: JsonSchema = {
       minLength: 1,
       maxLength: LIMITS.textChars,
       description:
-        "Music Macro Language: t120 tempo, o4 octave, < > octave shift, l8 default length, v12 velocity, c d e f g a b (+ # -), lengths 1–64 with dots, r rest, & tie/melisma, n60 MIDI, [きゃ] inline lyric. Example: t120 o4 l4 c d e2 r4 e8&e8",
+        "Music Macro Language: t120 tempo, o4 octave, < > octave shift, l8 default length, v12 velocity, c d e f g a b (+ # -), lengths 1–256 with dots, r rest, & tie/melisma, n60 MIDI, [きゃ] inline lyric. Example: t120 o4 l4 c d e2 r4 e8&e8",
     },
     lyrics: {
       type: "string",

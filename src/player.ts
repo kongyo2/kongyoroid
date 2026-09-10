@@ -33,7 +33,12 @@ export function playerCandidates(path: string, os: NodeJS.Platform = platform): 
   }
 }
 
-function attempt(candidate: PlayerCommand, signal?: AbortSignal): Promise<"ok" | "missing"> {
+type Attempt =
+  | { readonly outcome: "ok" }
+  | { readonly outcome: "missing" }
+  | { readonly outcome: "failed"; readonly reason: string };
+
+function attempt(candidate: PlayerCommand, signal?: AbortSignal): Promise<Attempt> {
   return new Promise((resolve, reject) => {
     const child = spawn(candidate.command, candidate.args, { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
@@ -46,40 +51,32 @@ function attempt(candidate: PlayerCommand, signal?: AbortSignal): Promise<"ok" |
     signal?.addEventListener("abort", onAbort, { once: true });
     child.once("error", (error: NodeJS.ErrnoException) => {
       signal?.removeEventListener("abort", onAbort);
-      if (error.code === "ENOENT") resolve("missing");
-      else reject(new KongyoroidError({ code: "PLAYER_UNAVAILABLE", message: error.message, retryable: false }, error));
+      if (error.code === "ENOENT") resolve({ outcome: "missing" });
+      else resolve({ outcome: "failed", reason: error.message });
     });
     child.once("exit", (code, signalName) => {
       signal?.removeEventListener("abort", onAbort);
       if (signal?.aborted) reject(aborted("Playback cancelled."));
-      else if (code === 0) resolve("ok");
-      else
-        reject(
-          new KongyoroidError({
-            code: "PLAYER_UNAVAILABLE",
-            message: `${candidate.command} exited with ${code ?? signalName ?? "unknown"}: ${stderr.trim()}`,
-            retryable: false,
-          }),
-        );
+      else if (code === 0) resolve({ outcome: "ok" });
+      else resolve({ outcome: "failed", reason: `exited with ${code ?? signalName ?? "unknown"}: ${stderr.trim()}` });
     });
   });
 }
 
 export async function playWav(path: string, signal?: AbortSignal): Promise<{ readonly player: string }> {
   const candidates = playerCandidates(path);
-  const tryFrom = async (index: number): Promise<{ readonly player: string }> => {
-    const candidate = candidates[index];
-    if (candidate === undefined) {
-      throw new KongyoroidError({
-        code: "PLAYER_UNAVAILABLE",
-        message: `No audio player found (tried ${candidates.map((c) => c.command).join(", ")}).`,
-        retryable: false,
-        hint: "Install one of the listed players or open the WAV file with your own tool.",
-      });
-    }
+  const attempts: string[] = [];
+  for (const candidate of candidates) {
     if (signal?.aborted) throw aborted("Playback cancelled.");
     const result = await attempt(candidate, signal);
-    return result === "ok" ? { player: candidate.command } : tryFrom(index + 1);
-  };
-  return tryFrom(0);
+    if (result.outcome === "ok") return { player: candidate.command };
+    attempts.push(`${candidate.command} (${result.outcome === "missing" ? "not found" : result.reason})`);
+  }
+  throw new KongyoroidError({
+    code: "PLAYER_UNAVAILABLE",
+    message: `No audio player could play ${path}. Tried: ${attempts.join("; ")}.`,
+    retryable: false,
+    hint: "Install one of the listed players, fix the failing one, or open the WAV file with your own tool.",
+    detail: { attempts },
+  });
 }

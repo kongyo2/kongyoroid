@@ -95,6 +95,27 @@ test("text streaming emits sentence events and audio in order as text arrives", 
   );
 });
 
+test("flushMs speaks a pending fragment after inactivity, and punctuation-only fragments are skipped", async () => {
+  const request = speech({ text: "x" });
+  const texts = async (source: AsyncIterable<string>, flushMs?: number): Promise<string[]> => {
+    const out: string[] = [];
+    for await (const event of synthesizeTextStream(source, request, {
+      sampleRate: 16000,
+      ...(flushMs === undefined ? {} : { flushMs }),
+    })) {
+      if (event.type === "sentence") out.push(event.text);
+    }
+    return out;
+  };
+  assert.deepEqual(await texts(chunks(["途中で", "止まる", "文。次"], 120), 40), ["途中で", "止まる", "文。", "次"]);
+  assert.deepEqual(await texts(chunks(["途中で", "止まる", "文。次"], 120)), ["途中で止まる文。", "次"]);
+  assert.deepEqual(await texts(chunks(["。。。", "！", "はい。", "…"], 1)), ["はい。"]);
+  assert.deepEqual(takeSentences("「やった！」と言った。", 100), {
+    sentences: ["「やった！」", "と言った。"],
+    rest: "",
+  });
+});
+
 test("text streaming stops with ABORTED when the signal fires", async () => {
   const request = speech({ text: "x" });
   const controller = new AbortController();
@@ -110,4 +131,24 @@ test("text streaming stops with ABORTED when the signal fires", async () => {
     })(),
     (error: unknown) => error instanceof KongyoroidError && error.code === "ABORTED",
   );
+  const waiting = new AbortController();
+  const stalled = synthesizeTextStream(
+    (async function* (): AsyncGenerator<string, void, void> {
+      yield "一。未完";
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    })(),
+    request,
+    { sampleRate: 16000, signal: waiting.signal, flushMs: 10_000 },
+  );
+  const startedAt = performance.now();
+  await assert.rejects(
+    (async () => {
+      for await (const event of stalled) {
+        if (event.type === "end") throw new Error("the stream ended before the abort");
+        if (event.type === "sentence") setTimeout(() => waiting.abort(), 80);
+      }
+    })(),
+    (error: unknown) => error instanceof KongyoroidError && error.code === "ABORTED",
+  );
+  assert.ok(performance.now() - startedAt < 1200, "an abort while waiting for input is not delayed by the source");
 });

@@ -17,6 +17,7 @@ import { DiskCache } from "./cache.ts";
 import type { Diagnostic, ErrorData } from "./errors.ts";
 import { EXIT_CODES, KongyoroidError, asKongyoroidError, exitCodeOf, formatDiagnostic, invalid } from "./errors.ts";
 import {
+  ensureReadableFile,
   existingFileSha256,
   readBytes,
   readChunks,
@@ -27,7 +28,7 @@ import {
   writeTextFile,
   writeWithBackpressure,
 } from "./io.ts";
-import { LIMITS } from "./limits.ts";
+import { DEFAULT_SAMPLE_RATE, LIMITS } from "./limits.ts";
 import type { KongyoroidOptions, VoiceKind } from "./kongyoroid.ts";
 import { Kongyoroid } from "./kongyoroid.ts";
 import { playWav } from "./player.ts";
@@ -38,7 +39,7 @@ import { pcm16Bytes, streamingWavHeader } from "./synth/stream.ts";
 import { LocalDictionary } from "./text/dictionary.ts";
 import type { RenderResult } from "./types.ts";
 import type { JsonObject } from "./validate.ts";
-import { isObject, keys, literal, object, string } from "./validate.ts";
+import { integer, isObject, keys, literal, object, string } from "./validate.ts";
 import { PACKAGE_NAME, VERSION } from "./version.ts";
 import type { DictionaryWordDraft } from "./voicevox/dictionary.ts";
 import { wavHeader } from "./wav.ts";
@@ -47,7 +48,7 @@ async function emit(value: unknown, error: boolean = false): Promise<void> {
   await writeStream(error ? process.stderr : process.stdout, `${JSON.stringify(value)}\n`);
 }
 
-function metadata(result: RenderResult): JsonObject {
+function metadata(result: RenderResult, extraWarnings: readonly Diagnostic[] = []): JsonObject {
   return {
     engine: result.engine,
     engineVersion: result.engineVersion,
@@ -67,31 +68,31 @@ function metadata(result: RenderResult): JsonObject {
     ...(result.peak === undefined ? {} : { peak: result.peak, rms: result.rms, limitedSamples: result.limitedSamples }),
     elapsedMs: result.elapsedMs,
     timings: result.timings,
-    warnings: result.warnings,
+    warnings: extraWarnings.length === 0 ? result.warnings : [...result.warnings, ...extraWarnings],
     adjustments: result.adjustments,
   };
 }
+
+const PLAN_UNAVAILABLE: Diagnostic = {
+  severity: "warning",
+  code: "PLAN_UNAVAILABLE",
+  message: "--plan-out was ignored: only the formant engine produces a synthesis plan.",
+  help: "Render with --engine formant (and no VOICEVOX style) to write the plan.",
+  path: "$flags.plan-out",
+};
 
 async function reportDiagnostics(values: Values, warnings: readonly Diagnostic[], location: string): Promise<void> {
   if (values.diagnostics !== "compact") return;
   for (const warning of warnings) await writeStream(process.stderr, `${formatDiagnostic(warning, location)}\n`);
 }
 
-async function deliver(
-  agent: Kongyoroid,
-  result: RenderResult,
-  values: Values,
-  signal: AbortSignal,
-  plan: unknown,
-): Promise<JsonObject> {
-  if (values["plan-out"] !== undefined && values["plan-out"] !== "-") {
-    await writeTextFile(
-      values["plan-out"],
-      `${JSON.stringify(plan ?? (await agent.plan(result.requestHash)), null, 2)}\n`,
-      values.force ?? false,
-    );
+async function deliver(result: RenderResult, values: Values, signal: AbortSignal, plan: unknown): Promise<JsonObject> {
+  const planOut = values["plan-out"];
+  const extraWarnings: Diagnostic[] = planOut !== undefined && plan === undefined ? [PLAN_UNAVAILABLE] : [];
+  if (planOut !== undefined && planOut !== "-" && plan !== undefined) {
+    await writeTextFile(planOut, `${JSON.stringify(plan, null, 2)}\n`, values.force ?? false);
   }
-  await reportDiagnostics(values, result.warnings, values.input ?? "<request>");
+  await reportDiagnostics(values, [...result.warnings, ...extraWarnings], values.input ?? "<request>");
   if (values.output === "-") {
     if (values.play)
       invalid("$flags.play", "--play cannot be combined with --output -.", {
@@ -101,8 +102,8 @@ async function deliver(
     return {
       ok: true,
       output: "stdout",
-      ...metadata(result),
-      ...(plan === undefined || values["plan-out"] !== "-" ? {} : { plan }),
+      ...metadata(result, extraWarnings),
+      ...(plan === undefined || planOut !== "-" ? {} : { plan }),
     };
   }
   const path = values.output ?? `kongyoroid-${result.kind}-${result.sha256.slice(0, 12)}.wav`;
@@ -113,19 +114,26 @@ async function deliver(
     path: written.path,
     written: written.written,
     unchanged: written.unchanged,
-    ...metadata(result),
+    ...metadata(result, extraWarnings),
     ...(played === undefined ? {} : { player: played.player }),
-    ...(plan === undefined || values["plan-out"] !== "-" ? {} : { plan }),
+    ...(plan === undefined || planOut !== "-" ? {} : { plan }),
   };
 }
 
 function speechRequestFromFlags(values: Values, text: string): JsonObject {
-  const request: JsonObject = { kind: "speech", text };
+  return withSpeechFlags(values, { kind: "speech", text });
+}
+
+function withSpeechFlags(values: Values, base: JsonObject): JsonObject {
+  const request: JsonObject = { ...base, kind: "speech" };
   assign(request, "engine", values.engine);
   assign(request, "voice", values.voice);
   assign(request, "kana", values.kana);
   const entries = parseDictEntries(values);
-  if (entries.length > 0) request["dictionary"] = entries;
+  if (entries.length > 0) {
+    const existing = Array.isArray(base["dictionary"]) ? base["dictionary"] : [];
+    request["dictionary"] = [...existing, ...entries];
+  }
   if (values["strict-reading"] === false) request["strictReading"] = false;
   assign(request, "speaker", styleFlag(values, "speaker"));
   assign(request, "speed", numberFlag(values, "speed"));
@@ -165,6 +173,15 @@ function songRequestFromFlags(values: Values, base: JsonObject): JsonObject {
       hint: 'Example: --lyrics "ドレミ" --melody "C4 D4 E4" --beats "1 1 2"',
     });
   }
+  if (request["notes"] === undefined) {
+    invalid(
+      values.input === undefined ? "$flags.melody" : "$.notes",
+      "A song needs notes: give --lyrics with --melody, --mml, or --input FILE containing a notes list.",
+      {
+        hint: 'Examples: kongyoroid sing --lyrics "ドレミ" --melody "C4 D4 E4" | kongyoroid sing --mml "t120 o4 c d e" | kongyoroid sing --input song.json',
+      },
+    );
+  }
   assign(request, "engine", values.engine);
   assign(request, "voice", values.voice);
   assign(request, "tempo", numberFlag(values, "tempo"));
@@ -199,36 +216,52 @@ function songRequestFromFlags(values: Values, base: JsonObject): JsonObject {
   return request;
 }
 
-async function textInput(values: Values, signal: AbortSignal): Promise<string> {
+function rejectTextAndInput(values: Values): void {
   if (values.text !== undefined && values.input !== undefined)
     invalid("$flags", "Use either --text or --input, not both.");
+}
+
+async function textInput(values: Values, signal: AbortSignal): Promise<string> {
+  rejectTextAndInput(values);
   if (values.text !== undefined) return values.text;
   if (values.input !== undefined) return (await readText(values.input, signal)).replace(/\r?\n$/u, "");
+  if (values.kana !== undefined) return values.kana;
   return invalid("$flags.text", "Provide --text or --input FILE (use - for standard input).", {
     hint: 'Example: kongyoroid speak --text "こんにちは" -o hello.wav',
   });
 }
 
+function overlayRequest(values: Values, json: unknown): unknown {
+  if (isObject(json) && json["kind"] === "song") return songRequestFromFlags(values, json);
+  if (isObject(json) && json["kind"] === "speech" && typeof json["text"] === "string")
+    return withSpeechFlags(values, json);
+  if (isObject(json)) {
+    const overlay: JsonObject = { ...json };
+    assign(overlay, "engine", values.engine);
+    assign(overlay, "voice", values.voice);
+    return overlay;
+  }
+  return json;
+}
+
 async function requestFromInputs(values: Values, signal: AbortSignal, command: string): Promise<unknown> {
+  rejectTextAndInput(values);
   const hasSpeech = values.text !== undefined || values.kana !== undefined;
   const hasSong = values.lyrics !== undefined || values.melody !== undefined || values.mml !== undefined;
   if (values.input !== undefined) {
     const raw = await readText(values.input, signal);
-    const trimmed = raw.trim();
-    if (hasSpeech && !hasSong && !trimmed.startsWith("{"))
-      return speechRequestFromFlags(values, raw.replace(/\r?\n$/u, ""));
-    const json = parseJson(raw);
-    if (isObject(json) && json["kind"] === "song") return songRequestFromFlags(values, json);
-    if (isObject(json) && values.engine !== undefined) return { ...json, engine: values.engine };
-    return json;
+    const looksLikeJson = raw.trim().startsWith("{");
+    if (!looksLikeJson && !hasSong) return speechRequestFromFlags(values, raw.replace(/\r?\n$/u, ""));
+    return overlayRequest(values, parseJson(raw));
   }
   if (hasSong) return songRequestFromFlags(values, {});
-  if (hasSpeech || values.text !== undefined) return speechRequestFromFlags(values, await textInput(values, signal));
+  if (hasSpeech) return speechRequestFromFlags(values, await textInput(values, signal));
+  const scoreHint = command === "speak" ? "" : ", or --lyrics/--melody/--mml";
   return invalid(
     "$flags.input",
-    `Provide --input FILE|- (a request JSON), --text, or --lyrics/--melody/--mml for ${command}.`,
+    `Provide --input FILE|- (text or a request JSON) or --text${scoreHint} for ${command}.`,
     {
-      hint: `Examples: kongyoroid ${command} --input request.json | kongyoroid ${command} --text "こんにちは"`,
+      hint: `Examples: kongyoroid ${command} --text "こんにちは" | kongyoroid ${command} --input request.json`,
     },
   );
 }
@@ -309,10 +342,13 @@ async function runPlan(agent: Kongyoroid, values: Values, signal: AbortSignal): 
 
 async function runSpeakStream(agent: Kongyoroid, values: Values, signal: AbortSignal): Promise<void> {
   if (values.play) invalid("$flags.play", "--play cannot be combined with --stream.");
+  rejectTextAndInput(values);
   const format = literal(values.format ?? "wav", "$flags.format", ["wav", "pcm", "ndjson"]);
   const output = values.output ?? "-";
   if (output !== "-" && format !== "wav")
     invalid("$flags.format", "Streaming to a file writes WAV; use --output - for pcm or ndjson.");
+  const flushRaw = numberFlag(values, "flush-ms");
+  const flushMs = flushRaw === undefined ? undefined : integer(flushRaw, "$flags.flush-ms", 1, 600_000);
   const input = speechRequestFromFlags(values, "placeholder");
   delete input["text"];
   const source: AsyncIterable<string> =
@@ -321,18 +357,16 @@ async function runSpeakStream(agent: Kongyoroid, values: Values, signal: AbortSi
           yield values.text ?? "";
         })()
       : readChunks(values.input ?? "-", signal);
-  const events = agent.speakStream(source, input, { signal });
+  const events = agent.speakStream(source, input, { signal, ...(flushMs === undefined ? {} : { flushMs }) });
   const stdout = process.stdout;
   let sampleRate = 0;
   let file: Awaited<ReturnType<typeof import("node:fs/promises").open>> | undefined;
   let fileFrames = 0;
-  let fileBytes = 0;
-  let filePath = "";
+  const filePath = output === "-" ? "" : resolve(output);
   const sentences: JsonObject[] = [];
   const openFile = async (): Promise<void> => {
-    if (output === "-") return;
+    if (output === "-" || file !== undefined) return;
     const { open } = await import("node:fs/promises");
-    filePath = resolve(output);
     if (!values.force) {
       const existing = await existingFileSha256(filePath);
       if (existing !== undefined)
@@ -341,11 +375,12 @@ async function runSpeakStream(agent: Kongyoroid, values: Values, signal: AbortSi
           repairOptions: [{ action: "use-force", description: "Overwrite with --force." }],
         });
     }
+    if (sampleRate === 0) sampleRate = numberFlag(values, "sample-rate") ?? DEFAULT_SAMPLE_RATE;
     file = await open(filePath, "w", 0o644);
     await file.write(wavHeader(0, sampleRate));
-    fileBytes = 44;
   };
   let headerWritten = false;
+  let completed = false;
   try {
     for await (const event of events) {
       if (event.type === "sentence") {
@@ -374,7 +409,6 @@ async function runSpeakStream(agent: Kongyoroid, values: Values, signal: AbortSi
         if (file !== undefined) {
           await file.write(bytes);
           fileFrames += block.samples.length;
-          fileBytes += bytes.length;
           continue;
         }
         if (format === "ndjson") {
@@ -392,12 +426,15 @@ async function runSpeakStream(agent: Kongyoroid, values: Values, signal: AbortSi
         await writeWithBackpressure(stdout, bytes, signal);
         continue;
       }
+      completed = true;
+      if (output !== "-") await openFile();
       const summary = {
         ok: true,
         operation: "speak",
         stream: true,
         format,
         output: output === "-" ? "stdout" : filePath,
+        ...(output === "-" ? {} : { written: true }),
         sentences: event.sentences,
         frames: event.frames,
         durationSeconds: Math.round(event.durationSeconds * 1000) / 1000,
@@ -413,8 +450,8 @@ async function runSpeakStream(agent: Kongyoroid, values: Values, signal: AbortSi
       const header = wavHeader(fileFrames, sampleRate);
       await file.write(header, 0, 44, 0);
       await file.close();
-      void fileBytes;
     }
+    void completed;
   }
 }
 
@@ -644,6 +681,13 @@ async function runCache(values: Values, positionals: readonly string[]): Promise
     await emit({ ok: true, operation: "cache.stats", ...(await cache.stats()) });
     return;
   }
+  const maxBytes = numberFlag(values, "max-bytes");
+  const maxEntries = numberFlag(values, "max-entries");
+  if (action === "prune" && maxBytes === undefined && maxEntries === undefined) {
+    invalid("$flags.max-bytes", "cache prune needs --max-bytes N and/or --max-entries N.", {
+      hint: "Example: kongyoroid cache prune --cache-dir ./cache --max-bytes 200000000",
+    });
+  }
   const before = await cache.stats();
   if (values["dry-run"]) {
     await emit({
@@ -651,15 +695,12 @@ async function runCache(values: Values, positionals: readonly string[]): Promise
       operation: `cache.${action}`,
       dryRun: true,
       directory: cache.directory,
-      wouldRemove: action === "clear" ? before.entries : null,
+      wouldRemove: action === "clear" ? before.entries : await cache.prune(maxBytes, maxEntries, true),
       ...before,
     });
     return;
   }
-  const removed =
-    action === "clear"
-      ? await cache.clear()
-      : await cache.prune(numberFlag(values, "max-bytes"), numberFlag(values, "max-entries"));
+  const removed = action === "clear" ? await cache.clear() : await cache.prune(maxBytes, maxEntries);
   await emit({ ok: true, operation: `cache.${action}`, directory: cache.directory, removed, ...(await cache.stats()) });
 }
 
@@ -713,8 +754,9 @@ async function main(argv: readonly string[]): Promise<void> {
   const signal = controller.signal;
   try {
     if (command === "play") {
-      const path = string(positionals[1], "$.play.file", 1, 4096);
-      await emit({ ok: true, operation: "play", path: resolve(path), ...(await playWav(resolve(path), signal)) });
+      const path = resolve(string(positionals[1], "$.play.file", 1, 4096));
+      await ensureReadableFile(path);
+      await emit({ ok: true, operation: "play", path, ...(await playWav(path, signal)) });
       return;
     }
     if (command === "inspect") {
@@ -737,11 +779,13 @@ async function main(argv: readonly string[]): Promise<void> {
     const agent = await createAgent(values, command === "dict");
     switch (command) {
       case "speak": {
-        if (values.stream) {
+        if (values.stream && !values["dry-run"]) {
           await runSpeakStream(agent, values, signal);
           return;
         }
-        const request = speechRequestFromFlags(values, await textInput(values, signal));
+        const request = await requestFromInputs(values, signal, "speak");
+        if (isObject(request) && request["kind"] !== "speech")
+          invalid("$.kind", "speak accepts only speech requests; use sing or render for songs.");
         if (values["dry-run"]) {
           await runValidateRequest(agent, request, values, signal);
           return;
@@ -751,7 +795,7 @@ async function main(argv: readonly string[]): Promise<void> {
           values["plan-out"] === undefined || result.engine !== "formant"
             ? undefined
             : (await agent.plan(request, { signal, detail: "phonemes" })).plan;
-        await emit(await deliver(agent, result, values, signal, plan), values.output === "-");
+        await emit(await deliver(result, values, signal, plan), values.output === "-");
         return;
       }
       case "sing": {
@@ -768,7 +812,7 @@ async function main(argv: readonly string[]): Promise<void> {
           values["plan-out"] === undefined || result.engine !== "formant"
             ? undefined
             : (await agent.plan(request, { signal, detail: "phonemes" })).plan;
-        await emit(await deliver(agent, result, values, signal, plan), values.output === "-");
+        await emit(await deliver(result, values, signal, plan), values.output === "-");
         return;
       }
       case "render": {
@@ -790,7 +834,7 @@ async function main(argv: readonly string[]): Promise<void> {
           values["plan-out"] === undefined || result.engine !== "formant"
             ? undefined
             : (await agent.plan(withFlags, { signal, detail: "phonemes" })).plan;
-        await emit(await deliver(agent, result, values, signal, plan), values.output === "-");
+        await emit(await deliver(result, values, signal, plan), values.output === "-");
         return;
       }
       case "validate":

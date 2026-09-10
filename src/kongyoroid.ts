@@ -33,6 +33,7 @@ import type {
   RenderStyles,
   RenderTimings,
   ResolvedRequest,
+  ResolvedSpeech,
   SongRequest,
   SpeechRequest,
   StyleRef,
@@ -40,7 +41,7 @@ import type {
   VoiceStyle,
 } from "./types.ts";
 import type { JsonObject } from "./validate.ts";
-import { integer, isObject } from "./validate.ts";
+import { integer, isObject, literal } from "./validate.ts";
 import { ENGINE_VERSION, FRONTEND_VERSION, PACKAGE_NAME, PLAN_VERSION, VERSION } from "./version.ts";
 import type { EngineAccentPhrase, EngineManifest, SupportedDevices } from "./voicevox/api.ts";
 import type { VoicevoxClientOptions } from "./voicevox/client.ts";
@@ -695,15 +696,17 @@ export class Kongyoroid {
 
   public async plan(
     request: unknown,
-    options: OperationOptions & { readonly detail?: PlanDetail } = {},
+    options: PlanDetail | (OperationOptions & { readonly detail?: PlanDetail }) = {},
   ): Promise<PlanResult> {
-    const compiled = await this.compile(request, options);
+    const resolved = typeof options === "string" ? { detail: options } : options;
+    const detail = literal(resolved.detail ?? "summary", "$.detail", ["summary", "phonemes", "acoustics"]);
+    const compiled = await this.compile(request, resolved);
     return {
       ok: true,
       operation: "plan",
       engine: "formant",
       requestHash: compiled.requestHash,
-      plan: summarizePlan(compiled.plan, compiled.planHash, options.detail ?? "summary"),
+      plan: summarizePlan(compiled.plan, compiled.planHash, detail),
       request: compiled.request,
     };
   }
@@ -966,13 +969,15 @@ export class Kongyoroid {
     options: Omit<TextStreamOptions, "dictionary"> = {},
   ): AsyncGenerator<TextStreamEvent, void, void> {
     const parsed = this.parse({ ...input, kind: "speech", text: "placeholder" });
-    const resolved = parsed.request;
-    if (resolved.kind !== "speech") invalid("$.kind", "Streaming synthesis needs a speech request.");
-    if (resolved.engine !== "formant") {
+    const request = parsed.request;
+    if (request.kind !== "speech") invalid("$.kind", "Streaming synthesis needs a speech request.");
+    if (request.engine === "voicevox") {
       invalid("$.engine", "Streaming synthesis is only available with the formant engine.", {
+        hint: 'Set engine to "formant" (or "auto", which streams with the built-in engine) and drop the speaker.',
         repairOptions: [{ action: "use-formant-engine", description: "Use engine formant for streaming." }],
       });
     }
+    const resolved: ResolvedSpeech = request.engine === "formant" ? request : { ...request, engine: "formant" };
     return synthesizeTextStream(chunks, resolved, {
       ...options,
       dictionary: this.dictionary,

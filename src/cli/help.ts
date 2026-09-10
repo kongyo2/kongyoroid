@@ -24,7 +24,7 @@ const OUTPUT_OPTIONS: readonly (readonly [string, string])[] = [
   ["-o, --output FILE|-", "WAV path (default kongyoroid-<kind>-<hash>.wav); - streams bytes to stdout, JSON to stderr"],
   ["--force", "Replace an existing output file (identical content is a no-op without --force)"],
   ["--play", "Play the result with the system player after writing"],
-  ["--plan-out FILE|-", "Also write the synthesis plan (reading, phonemes, timing) as JSON"],
+  ["--plan-out FILE|-", "Also write the synthesis plan (reading, phonemes, timing) as JSON; formant engine only"],
   ["--dry-run", "Validate and plan only; write nothing (same output as validate)"],
   ["--diagnostics json|compact", "How warnings are reported: inside the JSON (default) or one line each on stderr"],
 ];
@@ -63,6 +63,10 @@ const STREAM_OPTIONS: readonly (readonly [string, string])[] = [
     "Stream format for --output -: wav (unknown-length header), pcm (raw s16le mono), ndjson (JSON lines with base64 audio)",
   ],
   ["--progress", "With --stream, print a JSON line per sentence on stderr"],
+  [
+    "--flush-ms N",
+    "With --stream, speak a pending partial sentence after N ms without new input (default: wait for 。！？ or newline)",
+  ],
 ];
 
 const SONG_OPTIONS: readonly (readonly [string, string])[] = [

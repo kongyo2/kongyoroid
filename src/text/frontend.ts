@@ -187,7 +187,9 @@ function applyDictionaryAccents(
     let consumedInLast = 0;
     for (let k = found; k < end; k++) if (flat[k]?.phrase === lastPhraseIndex) consumedInLast += 1;
     const before = firstPhrase.moras.slice(0, offsetInFirst);
-    const after = lastPhrase.moras.slice(consumedInLast);
+    const after = lastPhrase.moras.slice(
+      firstPhraseIndex === lastPhraseIndex ? offsetInFirst + consumedInLast : consumedInLast,
+    );
     const middle: ReadingMora[] = [];
     for (let k = found; k < end; k++) {
       const flatMora = flat[k];

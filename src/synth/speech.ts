@@ -12,7 +12,7 @@ import { compileSegments, phoneDraft } from "./acoustics.ts";
 import { PHONEMES } from "./phonemes.ts";
 import type { MoraMarker, PhraseMarker, PitchPoint, SynthesisPlan } from "./plan.ts";
 import type { AccentCommand, BoundaryTone, FujisakiModel, PhraseCommand } from "./prosody.ts";
-import { FUJISAKI_ALPHA, FUJISAKI_BETA, FUJISAKI_GAMMA, applyPitchScale, evaluateFujisakiHz } from "./prosody.ts";
+import { FUJISAKI_ALPHA, FUJISAKI_BETA, FUJISAKI_GAMMA, FujisakiEvaluator, applyPitchScale } from "./prosody.ts";
 import type { VoiceProfile } from "./voice.ts";
 
 export interface SpeechPlanInput {
@@ -314,18 +314,22 @@ export function planSpeech(input: SpeechPlanInput): SynthesisPlan {
   const pitch: PitchPoint[] = [];
   let f0Min = Infinity;
   let f0Max = 0;
+  const evaluator = new FujisakiEvaluator(model);
   for (let t = 0; t <= totalSeconds + step; t += step) {
-    const hz = applyPitchScale(evaluateFujisakiHz(model, t), input.pitchScale);
+    const hz = applyPitchScale(evaluator.hzAt(t), input.pitchScale);
     pitch.push({ sample: Math.round(t * sampleRate), hz });
   }
-  for (const [index, phone] of phones.entries()) {
-    if (!PHONEMES[phone.phoneme].voiced) continue;
-    let start = 0;
-    for (let k = 0; k < index; k++) start += phones[k]?.seconds ?? 0;
+  let phoneStart = 0;
+  let pointIndex = 0;
+  for (const phone of phones) {
+    const start = phoneStart;
     const end = start + phone.seconds;
-    for (const point of pitch) {
-      const t = point.sample / sampleRate;
-      if (t < start || t > end) continue;
+    phoneStart = end;
+    if (!PHONEMES[phone.phoneme].voiced) continue;
+    while (pointIndex < pitch.length && (pitch[pointIndex]?.sample ?? 0) / sampleRate < start) pointIndex += 1;
+    for (let k = pointIndex; k < pitch.length; k++) {
+      const point = pitch[k];
+      if (point === undefined || point.sample / sampleRate > end) break;
       f0Min = Math.min(f0Min, point.hz);
       f0Max = Math.max(f0Max, point.hz);
     }

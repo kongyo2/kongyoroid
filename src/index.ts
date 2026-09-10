@@ -200,7 +200,7 @@ export { BUILTIN_VOICES, DEFAULT_VOICE_ID, describeVoice, resolveVoice, voicePro
 export type { SingingDefaults, VoiceProfile } from "./synth/voice.ts";
 export { lfDerivative, lfShapeFor, solveLfShape } from "./synth/glottal.ts";
 export type { LfShape } from "./synth/glottal.ts";
-export { evaluateFujisakiHz, evaluateFujisakiLog } from "./synth/prosody.ts";
+export { FujisakiEvaluator, evaluateFujisakiHz, evaluateFujisakiLog } from "./synth/prosody.ts";
 export type { FujisakiModel } from "./synth/prosody.ts";
 export { bandEnergyRatio, centsBetween, estimatePitch, signalStats, spectralCentroid } from "./synth/analysis.ts";
 export type { PitchEstimate, SignalStats } from "./synth/analysis.ts";
@@ -209,7 +209,7 @@ export type { CacheStats, DiskCacheOptions, RenderCache } from "./cache.ts";
 export { Semaphore, mapConcurrent } from "./concurrency.ts";
 export { playWav, playerCandidates } from "./player.ts";
 export type { PlayerCommand } from "./player.ts";
-export { readChunks, readLines, readText, writeAudio, writeAudioIdempotent } from "./io.ts";
+export { ensureReadableFile, readChunks, readLines, readText, writeAudio, writeAudioIdempotent } from "./io.ts";
 export type { WriteAudioResult } from "./io.ts";
 export { DEFAULT_ENDPOINT, VoicevoxClient } from "./voicevox/client.ts";
 export type { DictionaryWordInput, VoicevoxClientOptions } from "./voicevox/client.ts";

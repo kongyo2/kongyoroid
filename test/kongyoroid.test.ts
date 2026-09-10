@@ -7,6 +7,7 @@ import { KongyoroidError } from "../src/errors.ts";
 import { Kongyoroid } from "../src/kongyoroid.ts";
 import { parseKanaNotation } from "../src/text/notation.ts";
 import { loadFrontend } from "../src/text/frontend.ts";
+import { ENGINE_VERSION } from "../src/version.ts";
 import { MockEngine } from "./helpers/mock-engine.ts";
 
 const engine = new MockEngine();
@@ -39,7 +40,8 @@ test("the formant engine reads kanji text offline and reports readings, hashes, 
   assert.ok(result.peak !== undefined && result.peak > 0.1 && result.peak <= 1);
   assert.equal(result.limitedSamples, 0);
   assert.equal(result.requestHash.length, 64);
-  assert.equal(result.engineVersion, "formant-2.0.0");
+  assert.equal(result.engineVersion, ENGINE_VERSION);
+  assert.match(result.engineVersion, /^formant-\d+\.\d+\.\d+$/u);
   assert.ok(result.timings.readMs >= 0 && result.timings.renderMs > 0);
   assert.equal(engine.requests.length, 0);
   const again = await agent.speak("橋の端で箸を使う。");
@@ -61,6 +63,9 @@ test("validate, plan, compile, and renderPlan form an inspect-then-render loop",
   assert.equal(planned.plan.notes.length, 4);
   assert.equal(planned.plan.planHash, validation.planHash);
   assert.ok(planned.plan.phonemes !== undefined && planned.plan.phonemes.some((p) => p.phoneme === "k"));
+  const shorthand = await agent.plan(request, "acoustics");
+  assert.ok(shorthand.plan.phonemes?.[0]?.keyframes !== undefined);
+  assert.equal((await agent.plan(request)).plan.phonemes, undefined);
   const compiled = await agent.compile(request);
   const rendered = await agent.renderPlan(compiled.plan, { requestHash: compiled.requestHash });
   const direct = await agent.render(request);
@@ -162,6 +167,17 @@ test("streaming speech yields sentence and audio events through the facade", asy
     () => agent.speakStream((async function* (): AsyncGenerator<string, void, void> {})(), { speaker: 3 }),
     KongyoroidError,
   );
+  const auto = new Kongyoroid({ endpoint: DOWN, engine: "auto" });
+  const autoKinds: string[] = [];
+  for await (const event of auto.speakStream(
+    (async function* (): AsyncGenerator<string, void, void> {
+      yield "自動。";
+    })(),
+  )) {
+    autoKinds.push(event.type);
+  }
+  assert.equal(autoKinds[0], "sentence");
+  assert.equal(autoKinds.at(-1), "end");
 });
 
 test("speak against VOICEVOX resolves defaults, reports styles, and caches identical requests", async () => {

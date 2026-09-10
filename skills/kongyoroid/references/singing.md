@@ -51,7 +51,9 @@
 { "kind": "song", "notes": { "mml": "t132 o4 l8 e e r e r c e4 g4 r4 <g4 r4", "lyrics": "ららららららら" } }
 ```
 
-`lyrics` を省くと全音符が `ラ` になる。渡す場合は**有音の音符と同じモーラ数**にする (この例は有音 7 音 = `ら` 7 つ)。数が合わないと `INVALID_INPUT` (`The MML has 6 or more pitched notes but the lyrics have only 5 moras (note 8).`) になる。
+`lyrics` を省くと全音符が `ラ` になる。渡す場合は**有音の音符と同じモーラ数**にする (この例は有音 7 音 = `ら` 7 つ)。数が合わないと `INVALID_INPUT` (`The MML has 4 or more pitched notes but the lyrics have only 3 moras (note 4).`) になる。
+
+CLI からは `sing --lyrics … --melody … [--beats …]`、`sing --mml … [--lyrics …]`、`sing --input song.json` のいずれか。譜面の指定が 1 つも無いと `INVALID_INPUT` (`$flags.melody`) で、`hint` に 3 通りの書き方が出る。
 
 ## モーラと音符の対応
 
@@ -86,7 +88,7 @@
 
 **`sustainId` が同じ音符は 1 本の持続音**として鳴る。「あー」と伸ばしたいのに `sustainId` が増えているなら、意図せず切れている。逆に「ああ」と 2 回言わせたいのに `sustainId` が同じなら、`legato` が効きすぎている。
 
-`C4` の `あ` に `C4` の `あ` を続けた場合:
+`C4` の `あ` に `C4` の `あ` を続けた場合 (実測 `--lyrics "ああ" --melody "C4 C4"`):
 
 | `articulation` | 2 音目の `articulation` / `sustainId` |
 | --- | --- |
@@ -97,33 +99,39 @@
 タイ・メリスマは**直前の有音音符に直接続く**必要がある。休符を跨ぐと `INVALID_INPUT`:
 
 ```
-A tie or melisma must directly follow a pitched note; it cannot cross a rest.
-hint: After a rest, start a new note with a lyric (for example the vowel of the previous mora).
+A tie (~) must directly follow a pitched note.        path: $.notes.melody[2]
+hint: Ties cannot cross rests; after R start a new note with a lyric.
 ```
 
 つながった音符間のピッチ移行は `portamentoMs` (既定 60 ms、`0` で階段状)。
 
 ## 子音の借用と圧縮
 
-母音を拍頭に乗せるため、子音は**前の休符や前の音符の末尾から借りる** (最大 40 %)。tempo 120 で `あ` → `きゃ` と並べた場合:
+母音を拍頭に乗せるため、子音は**前の休符や前の音符の末尾から借りる** (最大 40 %)。tempo 120 で `あ` → `きゃ` と並べた場合 (実測):
 
 ```json
-{"id":"n1","lyric":"ア","startSeconds":0.16,"endSeconds":0.55,"vowelStartSeconds":0.16}
-{"id":"n2","lyric":"キャ","startSeconds":0.55,"endSeconds":1.16,"vowelStartSeconds":0.66}
+{"id":"n1","lyric":"ア","startSeconds":0.16,"vowelStartSeconds":0.16,"endSeconds":0.55}
+{"id":"n2","lyric":"キャ","startSeconds":0.55,"vowelStartSeconds":0.66,"endSeconds":1.16}
 ```
 
 `n2` の拍頭は 0.66 秒だが、子音 `ky` のために 0.55 秒から始まり、`n1` はそのぶん短くなっている。**`startSeconds` は子音を含む開始時刻、`vowelStartSeconds` が拍頭**。タイミングを検証するときは `vowelStartSeconds` を見る。
 
-借りても足りないときは子音を短縮し、`adjustments[]` に記録する:
+借りても足りないときは子音を短縮し、`adjustments[]` に記録する (実測 `--lyrics "しゅしゅ" --melody "C4 C4" --beats "0.25 0.25" --tempo 200`):
 
 ```json
-{"code":"CONSONANT_COMPRESSED","message":"Note n2: consonant shortened from 95 ms to 65 ms.",
- "noteId":"n2","path":"$.notes[1]","before":0.095,"after":0.0655}
+{"code":"CONSONANT_COMPRESSED","message":"Note n2: consonant shortened from 95 ms to 75 ms.",
+ "noteId":"n2","path":"$.notes[1]","before":0.095,"after":0.075}
 ```
 
 45 % を下回るまで縮めると `CONSONANT_HEAVILY_COMPRESSED` の警告が出る。子音が潰れると歌詞が聞き取れなくなるので、**警告が出たらテンポを下げるか拍を増やす**。`consonantCompression: false` (`--no-consonant-compression`) にすると短縮せず `NOTE_TOO_SHORT` で失敗する — 品質を機械的に守りたいときはこちらが使える。
 
-母音が 30 ms を切る音符は常に `NOTE_TOO_SHORT` になる。
+母音が 30 ms を切る音符は常に `NOTE_TOO_SHORT`:
+
+```
+Note n1 (カ) leaves only 18 ms for 1 vowel(s); at least 30 ms are needed.   path: $.notes[0].beats
+detail: {"availableMs":18,"requiredMs":30,"noteId":"n1"}
+repairOptions: increase-duration ($.notes[0].beats) / use-vowel-continuation ($.notes[0].lyric)
+```
 
 ## 音符ごとのパラメータ
 
@@ -155,30 +163,30 @@ hint: After a rest, start a new note with a lyric (for example the vowel of the 
 | `breathiness` | 0 | −1..1.5 | 声門の張り |
 | `sampleRate` / `seed` | 24000 / 1 | — | 出力レート / ノイズの種 |
 
-ビブラートは持続母音ごとに掛かる。速いパッセージでは `delayMs` (既定 180) に届かず掛からないので、揺れが欲しければ `delayMs` を下げる。逆に短い音符が揺れて濁るなら音符ごとに `"vibrato": false` を置く。
+ビブラートは持続母音ごとに掛かる。速いパッセージでは `delayMs` (既定 180) に届かず掛からないので、揺れが欲しければ `delayMs` を下げる。逆に短い音符が揺れて濁るなら音符ごとに `"vibrato": false` を置く。音高を厳密に検証するときは `--vibrato-depth 0` で描画する。
 
 ## 音域
 
 エンジンの合成範囲は **30–2500 Hz** かつサンプルレートの 20 % まで。外れると `PITCH_OUT_OF_RANGE` (終了コード 2):
 
 ```
-The score spans 8372.0–8518.4 Hz; the engine synthesizes 30–2500 Hz at 24000 Hz.
+The score spans 8372.0–8518.4 Hz; the engine synthesizes 30–1600 Hz at 8000 Hz.
 repairOptions: lower-pitch ($.transpose) / raise-sample-rate ($.sampleRate)
 ```
 
 ボイスごとの得意音域 (`f0Range`) を外れると `F0_OUTSIDE_VOICE_RANGE` の**警告**が出る。描画自体は通るが声質が崩れるので、`transpose` するかボイスを替える:
 
 ```
-The score spans 1047–1047 Hz; voice deep is tuned for 45–600 Hz.
+The score spans 2093–2093 Hz; voice deep is tuned for 45–600 Hz.
 ```
 
 ボイスの `f0Range` は [speech.md](speech.md#内蔵ボイス) と `kongyoroid voices --engine formant`。
 
-音高の精度は高い。持続した C4 (理論値 261.63 Hz) を `inspect` すると `medianHz: 261.4` — 約 1.5 セント差。
+音高の精度は高い。持続した A3 (理論値 220 Hz) を `inspect` すると `medianHz: 219.7`。拍ごとに変わる音階でも 8 セント以内 (テストで検証)。
 
 ## MML
 
-`t` テンポ、`o` オクターブ、`<` `>` オクターブ増減、`l` 既定音長、`v` ベロシティ、`n60` MIDI 番号、`r` 休符、`&` タイ / メリスマ、`.` 付点、`[きゃ]` その音符の歌詞。
+`t` テンポ、`o` オクターブ、`<` `>` オクターブ増減、`l` 既定音長、`v` ベロシティ、`n60` MIDI 番号、`r` 休符、`&` タイ / メリスマ、`.` 付点、`[きゃ]` その音符の歌詞。音長は 1–256 (4 = 四分音符)。
 
 ```
 t120 o4 l8 v110 c4. d n67 r4 e&e [きゃ]f

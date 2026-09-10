@@ -10,6 +10,11 @@ export interface SentencePiece {
 }
 
 const HARD_TERMINALS: ReadonlySet<string> = new Set(["。", "！", "？", "!", "?", "．"]);
+const CLOSERS: ReadonlySet<string> = new Set(["」", "』", "）", ")", "】", "］", "]", "〉", "》", "”", "’"]);
+
+export function isSentenceCloser(char: string): boolean {
+  return CLOSERS.has(char);
+}
 
 function isDigit(char: string | undefined): boolean {
   return char !== undefined && /^[0-9０-９]$/u.test(char);
@@ -67,7 +72,7 @@ export function splitSentences(text: string): readonly SentencePiece[] {
         continue;
       }
       let run = index + 1;
-      while (run < chars.length && HARD_TERMINALS.has(chars[run] ?? "")) run += 1;
+      while (run < chars.length && (HARD_TERMINALS.has(chars[run] ?? "") || CLOSERS.has(chars[run] ?? ""))) run += 1;
       flush(run, "。", run, false);
       index = run;
       continue;
@@ -75,10 +80,13 @@ export function splitSentences(text: string): readonly SentencePiece[] {
     if (HARD_TERMINALS.has(char)) {
       let run = index + 1;
       let terminal = terminalOf(char);
-      while (run < chars.length && HARD_TERMINALS.has(chars[run] ?? "")) {
-        const extra = terminalOf(chars[run] ?? "");
-        if (extra === "？") terminal = "？";
-        else if (extra === "！" && terminal !== "？") terminal = "！";
+      while (run < chars.length && (HARD_TERMINALS.has(chars[run] ?? "") || CLOSERS.has(chars[run] ?? ""))) {
+        const next = chars[run] ?? "";
+        if (HARD_TERMINALS.has(next)) {
+          const extra = terminalOf(next);
+          if (extra === "？") terminal = "？";
+          else if (extra === "！" && terminal !== "？") terminal = "！";
+        }
         run += 1;
       }
       flush(run, terminal, run, false);

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { link, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
+import { constants, createReadStream } from "node:fs";
+import { access, link, mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { stdin } from "node:process";
 import type { Readable, Writable } from "node:stream";
@@ -93,6 +93,16 @@ export async function readText(path: string, signal?: AbortSignal, limit: number
   } finally {
     signal?.removeEventListener("abort", abort);
     if (path !== "-") stream.destroy();
+  }
+}
+
+export async function ensureReadableFile(path: string): Promise<void> {
+  try {
+    const info = await stat(path);
+    if (!info.isFile()) throw new Error("not a regular file");
+    await access(path, constants.R_OK);
+  } catch (error) {
+    throw ioError(`Could not read ${path}`, error);
   }
 }
 

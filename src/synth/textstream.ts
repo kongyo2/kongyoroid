@@ -1,7 +1,8 @@
 import type { Diagnostic } from "../errors.ts";
-import { checkAbort } from "../errors.ts";
+import { aborted, checkAbort } from "../errors.ts";
 import { LIMITS } from "../limits.ts";
 import type { BoundaryKind } from "../text/notation.ts";
+import { isSentenceCloser } from "../text/sentences.ts";
 import type { ResolvedSpeech } from "../types.ts";
 import type { CompileOptions } from "./engine.ts";
 import { compileRequest } from "./engine.ts";
@@ -52,12 +53,36 @@ export function takeSentences(
       break;
     }
     let end = match.index + match[0].length;
-    while (end < rest.length && TERMINALS.test(rest[end] ?? "")) end += 1;
+    while (end < rest.length && (TERMINALS.test(rest[end] ?? "") || isSentenceCloser(rest[end] ?? ""))) end += 1;
     const sentence = rest.slice(0, end);
     rest = rest.slice(end);
     if (sentence.trim().length > 0) sentences.push(sentence);
   }
   return { sentences, rest };
+}
+
+const SPEAKABLE = /[\p{L}\p{N}]/u;
+
+export function isSpeakable(text: string): boolean {
+  return SPEAKABLE.test(text);
+}
+
+function chunkOrTimeout<T>(pending: Promise<T>, ms: number, signal?: AbortSignal): Promise<T | undefined> {
+  let timer: NodeJS.Timeout | undefined;
+  let onAbort: (() => void) | undefined;
+  const timeout = new Promise<undefined>((resolve, reject) => {
+    if (signal?.aborted === true) {
+      reject(aborted("Streaming cancelled."));
+      return;
+    }
+    timer = setTimeout(() => resolve(undefined), ms);
+    onAbort = (): void => reject(aborted("Streaming cancelled."));
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+  return Promise.race([pending, timeout]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+    if (onAbort !== undefined) signal?.removeEventListener("abort", onAbort);
+  });
 }
 
 function lastPauseIndex(chars: readonly string[], maxChars: number): number {
@@ -128,22 +153,55 @@ export async function* synthesizeTextStream(
     index += 1;
   };
   const queue: string[] = [];
-  for await (const chunk of chunks) {
-    checkAbort(options.signal);
-    buffer += chunk;
-    const taken = takeSentences(buffer, maxChars);
-    buffer = taken.rest;
-    queue.push(...taken.sentences);
-    while (queue.length > 0) {
-      const text = queue.shift();
-      if (text === undefined) break;
-      const following = queue[0];
-      yield* emit(text);
-      if (following !== undefined) pendingPlan = compile(following);
+  const flushMs = options.flushMs !== undefined && options.flushMs > 0 ? options.flushMs : undefined;
+  const iterator = chunks[Symbol.asyncIterator]();
+  let pending: Promise<IteratorResult<string, void>> | undefined;
+  let exhausted = false;
+  try {
+    while (!exhausted) {
+      checkAbort(options.signal);
+      pending ??= iterator.next();
+      let result: IteratorResult<string, void>;
+      if (flushMs !== undefined && buffer.trim().length > 0) {
+        const raced = await chunkOrTimeout(pending, flushMs, options.signal);
+        if (raced === undefined) {
+          const text = buffer;
+          buffer = "";
+          pendingPlan = undefined;
+          if (isSpeakable(text)) yield* emit(text);
+          continue;
+        }
+        result = raced;
+      } else {
+        result = await pending;
+      }
+      pending = undefined;
+      if (result.done === true) {
+        exhausted = true;
+        break;
+      }
+      buffer += result.value;
+      const taken = takeSentences(buffer, maxChars);
+      buffer = taken.rest;
+      queue.push(...taken.sentences.filter(isSpeakable));
+      while (queue.length > 0) {
+        const text = queue.shift();
+        if (text === undefined) break;
+        const following = queue[0];
+        yield* emit(text);
+        if (following !== undefined) pendingPlan = compile(following);
+      }
+    }
+  } finally {
+    if (pending !== undefined) pending.catch(() => undefined);
+    if (!exhausted) {
+      const closing = iterator.return?.();
+      if (options.signal?.aborted === true) closing?.catch(() => undefined);
+      else await closing;
     }
   }
   const tail = buffer.trim();
-  if (tail.length > 0) {
+  if (isSpeakable(tail)) {
     pendingPlan = undefined;
     yield* emit(tail);
   }

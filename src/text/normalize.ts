@@ -334,6 +334,14 @@ export function normalizeForReading(text: string, options: NormalizeOptions = {}
       let spoken = "";
       for (const c of raw) spoken += URL_SYMBOLS[c] === undefined ? c : ` ${URL_SYMBOLS[c]} `;
       builder.push(spoken.replaceAll(/\s+/gu, " ").trim(), sourceIndex);
+      diagnostics.push({
+        severity: "advice",
+        code: "EMAIL_READ_LITERALLY",
+        message: `The email address ${JSON.stringify(raw)} is read character by character.`,
+        help: "Replace email addresses with a short description before synthesis if that is not intended.",
+        sourceSpan: spanOf(index, index + length),
+        surface: raw,
+      });
       index += length;
       continue;
     }

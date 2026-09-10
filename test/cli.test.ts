@@ -387,7 +387,137 @@ test("an unreachable engine exits 3 with a hint, and engine auto falls back", as
 });
 
 test("play reports a missing file or player as an io error", async () => {
-  const result = await runCli(["play", join(workdir, "missing.wav")], { env: { PATH: workdir } });
+  const missing = await runCli(["play", join(workdir, "missing.wav")], { env: { PATH: workdir } });
+  assert.equal(missing.code, 4);
+  assert.equal(pick(lastJson(missing.stderr), "error", "code"), "IO_ERROR");
+  const wav = join(workdir, "playable.wav");
+  await runCli(["speak", "--text", "あ", "-o", wav]);
+  const result = await runCli(["play", wav], { env: { PATH: workdir } });
   assert.equal(result.code, 4);
   assert.equal(pick(lastJson(result.stderr), "error", "code"), "PLAYER_UNAVAILABLE");
+});
+
+test("--plan-out with a VOICEVOX render still writes the audio and reports that no plan exists", async () => {
+  const env = { KONGYOROID_ENDPOINT: engine.url };
+  const planPath = join(workdir, "voicevox.plan.json");
+  const output = join(workdir, "voicevox-plan.wav");
+  const result = await runCli(["speak", "--text", "あ", "--speaker", "3", "--plan-out", planPath, "-o", output], {
+    env,
+  });
+  assert.equal(result.code, 0, result.stderr);
+  const json = lastJson(result.stdout);
+  assert.equal(json["engine"], "voicevox");
+  assert.equal(json["written"], true);
+  assert.ok(list(json["warnings"]).some((warning) => pick(warning, "code") === "PLAN_UNAVAILABLE"));
+  await assert.rejects(readFile(planPath));
+  const inline = await runCli(["speak", "--text", "あ", "--speaker", "3", "--plan-out", "-", "-o", output], { env });
+  assert.equal(inline.code, 0, inline.stderr);
+  assert.equal(lastJson(inline.stdout)["plan"], undefined);
+  const formant = await runCli(["speak", "--text", "あ", "--plan-out", "-", "-o", join(workdir, "formant-plan.wav")]);
+  assert.equal(formant.code, 0, formant.stderr);
+  assert.equal(pick(lastJson(formant.stdout), "plan", "kind"), "speech");
+  assert.ok(!list(lastJson(formant.stdout)["warnings"]).some((w) => pick(w, "code") === "PLAN_UNAVAILABLE"));
+});
+
+test("--stream honours --dry-run, writes an empty WAV for empty input, and flushes on --flush-ms", async () => {
+  const dryPath = join(workdir, "stream-dry.wav");
+  const dry = await runCli(["speak", "--text", "あ。い。", "--stream", "--dry-run", "-o", dryPath]);
+  assert.equal(dry.code, 0, dry.stderr);
+  assert.equal(lastJson(dry.stdout)["dryRun"], true);
+  assert.equal(lastJson(dry.stdout)["operation"], "validate");
+  await assert.rejects(readFile(dryPath));
+  const emptyPath = join(workdir, "stream-empty.wav");
+  const empty = await runCli(["speak", "--input", "-", "--stream", "-o", emptyPath], { input: "" });
+  assert.equal(empty.code, 0, empty.stderr);
+  const summary = lastJson(empty.stdout);
+  assert.equal(summary["output"], emptyPath);
+  assert.equal(summary["written"], true);
+  assert.equal(summary["sentences"], 0);
+  assert.equal(inspectWav(new Uint8Array(await readFile(emptyPath))).frames, 0);
+  const flushed = await runCli(
+    ["speak", "--input", "-", "--stream", "--flush-ms", "150", "-o", "-", "--format", "ndjson"],
+    {
+      inputChunks: [
+        { text: "最初の文", afterMs: 0 },
+        { text: "です。次", afterMs: 900 },
+        { text: "の文", afterMs: 900 },
+      ],
+    },
+  );
+  assert.equal(flushed.code, 0, flushed.stderr);
+  const sentences = allJson(flushed.stdout)
+    .filter((event) => event["type"] === "sentence")
+    .map((event) => String(event["text"]));
+  assert.deepEqual(sentences.slice(0, 2), ["最初の文", "です。"]);
+  assert.equal(sentences.slice(2).join(""), "次の文");
+  const waited = await runCli(["speak", "--input", "-", "--stream", "-o", "-", "--format", "ndjson"], {
+    inputChunks: [
+      { text: "最初の文", afterMs: 0 },
+      { text: "です。次", afterMs: 300 },
+      { text: "の文", afterMs: 300 },
+    ],
+  });
+  assert.equal(waited.code, 0, waited.stderr);
+  assert.deepEqual(
+    allJson(waited.stdout)
+      .filter((event) => event["type"] === "sentence")
+      .map((event) => event["text"]),
+    ["最初の文です。", "次の文"],
+  );
+  const badFlush = await runCli(["speak", "--text", "あ", "--stream", "--flush-ms", "0", "-o", "-", "--format", "pcm"]);
+  assert.equal(badFlush.code, 2);
+  assert.equal(pick(lastJson(badFlush.stderr), "error", "path"), "$flags.flush-ms");
+});
+
+test("JSON requests on stdin accept the same flags as --text, and sing without notes explains itself", async () => {
+  const request = { kind: "speech", text: "kongyoroidを使う" };
+  const validated = await runCli(
+    ["validate", "--input", "-", "--dict-entry", "kongyoroid=コンギョロイド:0", "--voice", "male"],
+    {
+      input: JSON.stringify(request),
+    },
+  );
+  assert.equal(validated.code, 0, validated.stderr);
+  assert.equal(pick(lastJson(validated.stdout), "reading", "kana"), "コンギョロイドヲ/_ツカウ。");
+  assert.equal(pick(lastJson(validated.stdout), "request", "voice"), "male");
+  const planned = await runCli(["plan", "--input", "-", "--kana", "ア'"], { input: JSON.stringify(request) });
+  assert.equal(planned.code, 0, planned.stderr);
+  assert.equal(pick(lastJson(planned.stdout), "plan", "reading", "kana"), "ア'。");
+  const spoken = await runCli(["speak", "--input", "-", "-o", join(workdir, "speak-json.wav"), "--speed", "1.2"], {
+    input: JSON.stringify({ kind: "speech", text: "あ", voice: "male" }),
+  });
+  assert.equal(spoken.code, 0, spoken.stderr);
+  assert.equal(lastJson(spoken.stdout)["voice"], "male");
+  const wrongKind = await runCli(["speak", "--input", "-", "-o", join(workdir, "speak-song.wav")], {
+    input: JSON.stringify({ kind: "song", notes: { lyrics: "あ", melody: "C4" } }),
+  });
+  assert.equal(wrongKind.code, 2);
+  assert.equal(pick(lastJson(wrongKind.stderr), "error", "path"), "$.kind");
+  const both = await runCli(["validate", "--text", "あ", "--input", "-"], { input: "い" });
+  assert.equal(both.code, 2);
+  const kanaOnly = await runCli(["speak", "--kana", "コンニチワ'", "-o", join(workdir, "kana-only.wav")]);
+  assert.equal(kanaOnly.code, 0, kanaOnly.stderr);
+  assert.equal(lastJson(kanaOnly.stdout)["kana"], "コンニチワ'。");
+  const noNotes = await runCli(["sing", "-o", join(workdir, "no-notes.wav")]);
+  assert.equal(noNotes.code, 2);
+  assert.equal(pick(lastJson(noNotes.stderr), "error", "path"), "$flags.melody");
+  assert.ok(String(pick(lastJson(noNotes.stderr), "error", "hint")).includes("--mml"));
+});
+
+test("cache prune needs a limit, and --dry-run reports what would be removed", async () => {
+  const cacheDir = join(workdir, "prune-cache");
+  for (const text of ["いち", "に", "さん"]) {
+    const spoken = await runCli(["speak", "--text", text, "--cache-dir", cacheDir, "-o", "-"]);
+    assert.equal(spoken.code, 0, spoken.stderr);
+  }
+  const noLimit = await runCli(["cache", "prune", "--cache-dir", cacheDir]);
+  assert.equal(noLimit.code, 2);
+  assert.equal(pick(lastJson(noLimit.stderr), "error", "path"), "$flags.max-bytes");
+  const dry = await runCli(["cache", "prune", "--cache-dir", cacheDir, "--max-entries", "1", "--dry-run"]);
+  assert.equal(dry.code, 0, dry.stderr);
+  assert.equal(lastJson(dry.stdout)["wouldRemove"], 2);
+  assert.equal(lastJson(dry.stdout)["entries"], 3);
+  const pruned = await runCli(["cache", "prune", "--cache-dir", cacheDir, "--max-entries", "1"]);
+  assert.equal(lastJson(pruned.stdout)["removed"], 2);
+  assert.equal(lastJson(pruned.stdout)["entries"], 1);
 });

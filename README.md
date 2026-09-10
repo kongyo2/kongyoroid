@@ -37,12 +37,15 @@ kongyoroid speak --text "橋の端" --kana "ハシ'ノ/ハシ" -o hashi.wav
 
 # 文が届き次第、音声を流す (LLM の出力をそのまま再生)
 llm-agent run | kongyoroid speak --input - --stream --output - --format pcm | aplay -f S16_LE -r 24000 -c 1
+
+# リクエスト JSON はそのまま speak / render に渡せる
+kongyoroid speak --input request.json --voice soft -o request.wav
 ```
 
 すべてのコマンドは標準出力に 1 行の JSON を書きます。
 
 ```json
-{"ok":true,"path":"/work/result.wav","written":true,"unchanged":false,"engine":"formant","engineVersion":"formant-2.0.0","kind":"speech","voice":"neutral","kana":"テ'_ストガ/サン'ゲン/シッパイ/シマ'_シタ。","sha256":"66b3…","requestHash":"42de…","bytes":108942,"sampleRate":24000,"channels":1,"frames":54449,"durationSeconds":2.269,"peak":0.4772,"rms":0.081,"limitedSamples":0,"warnings":[],"adjustments":[]}
+{"ok":true,"path":"/work/result.wav","written":true,"unchanged":false,"engine":"formant","engineVersion":"formant-2.1.0","kind":"speech","voice":"neutral","kana":"テ'_ストガ/サン'ゲン/シッパイ/シマ'_シタ。ロ'グヲ/カクニン/_シテ/クダサ'イ。","chunks":2,"cached":false,"sha256":"66b3…","requestHash":"42de…","bytes":209622,"sampleRate":24000,"channels":1,"frames":104789,"durationSeconds":4.366,"peak":0.7198,"rms":0.0925,"limitedSamples":0,"warnings":[],"adjustments":[]}
 ```
 
 ## エージェント向けの作法
@@ -66,13 +69,13 @@ llm-agent run | kongyoroid speak --input - --stream --output - --format pcm | ap
 
 内蔵エンジンは次の順で文章を読みます。
 
-1. **正規化**: 日付 (`2026/09/07` → 2026年9月7日)、時刻 (`9:05` → 9時5分)、バージョン (`v1.2.3` → ブイ1テン2テン3)、単位 (`3ms` → 3ミリ秒、`100kg`、`25℃`)、通貨 (`¥1,200`、`$5`)、符号と範囲 (`-5`、`10〜20`)、`#42`、URL とメールアドレス (記号を読み下し、`URL_READ_LITERALLY` の助言付き)、Markdown の行頭記号、全角/半角。
-2. **英単語**: 約 500 語の技術系レキシコン (`npm`、`API`、`Claude Code`、`GitHub`、`deploy` …) をカタカナとアクセントに置き換えます。頭字語は「最後の文字の先頭にアクセント」(エーピーア'イ) で読み、フロントエンドが文字ごとに分割してしまう読みを 1 つのアクセント句にまとめます。未知の 5 文字以上の英単語には `ASCII_WORD_UNKNOWN` の助言が付きます。
+1. **正規化**: 日付 (`2026/09/07` → 2026年9月7日)、時刻 (`9:05` → 9時5分)、バージョン (`v1.2.3` → ブイ1テン2テン3)、単位 (`3ms` → 3ミリ秒、`100kg`、`25℃`)、通貨 (`¥1,200`、`$5`)、符号と範囲 (`-5`、`10〜20`)、`#42`、URL とメールアドレス (記号を読み下し、`URL_READ_LITERALLY` / `EMAIL_READ_LITERALLY` の助言付き)、Markdown の行頭記号、全角/半角。
+2. **英単語**: 約 700 語の技術系レキシコン (`npm`、`API`、`Claude Code`、`GitHub`、`deploy` …) をカタカナとアクセントに置き換えます。頭字語は「最後の文字の先頭にアクセント」(エーピーア'イ) で読み、フロントエンドが文字ごとに分割してしまう読みを 1 つのアクセント句にまとめます。未知の 5 文字以上の英単語には `ASCII_WORD_UNKNOWN` の助言が付きます。
 3. **形態素解析とアクセント**: jpreprocess (OpenJTalk の Rust 実装) と NAIST-JDic で読みとアクセント核、アクセント句境界を決めます。数詞・助数詞 (3件 → サン'ゲン、一本 → イッ'ポン)、助詞の付属、母音の無声化 (デ_ス) を含みます。
 4. **辞書**: リクエストの `dictionary`、`--dict-entry`、`--dictionary` ファイル (`KONGYOROID_DICTIONARY`) の順で表記を読みに置き換え、指定があればアクセントも上書きします。同じ読みが文中に複数ある場合は位置で照合するので、「橋の端」で `端 → ハシ (0)` を登録しても橋のアクセントは変わりません。
 5. **読めない文字**: フロントエンドが黙って落とす文字 (幽霊文字、ハングル、絵文字など) は既定で `UNREADABLE_TEXT` エラーになり、位置 (`sourceSpan`) と修正案 (かな指定・辞書追加・削除) を返します。`strictReading: false` (`--no-strict-reading`) なら警告付きで読み飛ばします。
 
-読みは `reading` コマンドか `plan` で確認できます。各アクセント句には `accentSource` (`frontend` / `dictionary` / `lexicon` / `user` / `rule`) が付き、どこから来た読みかが分かります。
+読みは `reading` コマンドか `plan` で確認できます。各アクセント句には `accentSource` (`frontend` / `dictionary` / `lexicon` / `user` / `rule`) が付き、どこから来た読みかが分かります。文は `。！？` と改行で区切られ、直後の閉じ括弧 (`」』）` など) は前の文に付きます。
 
 ### かな記法
 
@@ -153,9 +156,12 @@ kongyoroid speak --input - --stream --output - --format ndjson
 
 # ファイルへ (最後にヘッダーを書き戻す)
 kongyoroid speak --input - --stream -o long.wav --progress
+
+# 文末記号が来なくても、300 ms 入力が止まれば溜まった分を読む
+kongyoroid speak --input - --stream --flush-ms 300 --output - --format pcm
 ```
 
-文の切れ目 (`。！？` と改行) で分割し、次の文を先読みして合成するので、途切れません。文間ポーズは次の文の先頭に付くため、一括合成した場合と同じ長さになります。ライブラリでは `agent.speakStream(asyncIterable)` が `sentence` / `audio` / `end` イベントを返します。
+文の切れ目 (`。！？` と改行) で分割し、次の文を先読みして合成するので、途切れません。文間ポーズは次の文の先頭に付くため、一括合成した場合と同じ長さになります。`--flush-ms N` を付けると、文末記号が届かないまま N ms 入力が止まった時点で溜まっている断片を 1 文として読みます。ライブラリでは `agent.speakStream(asyncIterable, input, { flushMs })` が `sentence` / `audio` / `end` イベントを返します。
 
 ## 内蔵ボイス
 
@@ -200,13 +206,13 @@ const song = await agent.sing({ notes: { lyrics: "ドレミ", melody: "C4 D4 E4"
 // 確認してから書き出す
 const check = await agent.validate({ kind: "speech", text: "…" });
 if (check.renderable) {
-  const plan = await agent.plan({ kind: "speech", text: "…" }, "phonemes");
+  const plan = await agent.plan({ kind: "speech", text: "…" }, { detail: "phonemes" });
   const compiled = await agent.compile({ kind: "speech", text: "…" });
   const result = await agent.renderPlan(compiled.plan, { requestHash: compiled.requestHash });
 }
 
-// 文単位のストリーミング
-for await (const event of agent.speakStream(tokens())) {
+// 文単位のストリーミング (flushMs: 文末記号が来なくても 300 ms 止まれば読む)
+for await (const event of agent.speakStream(tokens(), { voice: "soft" }, { flushMs: 300 })) {
   if (event.type === "audio") play(event.block.samples); // Float32Array
 }
 ```

@@ -12,7 +12,7 @@
 | 1 | 内部エラー | バグ。`error.detail` を添えて報告 |
 | 2 | 入力エラー | 不正な JSON、未知のプロパティ、読めない文字、短すぎる音符、音域外 |
 | 3 | エンジン利用不可 | VOICEVOX 未起動・タイムアウト、フロントエンドのロード失敗 |
-| 4 | 入出力エラー | 既存ファイルの上書き拒否、読めない入力ファイル、プレイヤー無し |
+| 4 | 入出力エラー | 既存ファイルの上書き拒否、読めない入力ファイル、再生できるプレイヤーが無い |
 | 130 | 中断 | SIGINT / AbortSignal |
 
 ### エラーオブジェクト
@@ -50,11 +50,13 @@
 | --- | --- | --- |
 | `UNREADABLE_TEXT_SKIPPED` | warning | `--no-strict-reading` で読み飛ばした文字 |
 | `ASCII_WORD_UNKNOWN` | advice | レキシコンに無い 5 文字以上の英単語。文字ごとに読まれる可能性 |
-| `URL_READ_LITERALLY` | advice | URL を記号ごと読み下した |
+| `URL_READ_LITERALLY` / `EMAIL_READ_LITERALLY` | advice | URL / メールアドレスを記号ごと読み下した |
 | `HEURISTIC_READING` | advice | フロントエンド無しでかなを機械的に読んだ |
 | `F0_OUTSIDE_VOICE_RANGE` | warning | ボイスの得意音域を外れている |
 | `CONSONANT_HEAVILY_COMPRESSED` | warning | 子音を 45 % 未満まで短縮した |
 | `CONSONANT_TAKEN_FROM_NOTE` / `CONSONANT_COMPRESSED` | adjustment | 子音が音符内に入った / 短縮された |
+| `PLAN_UNAVAILABLE` | warning | `--plan-out` を VOICEVOX の描画に付けた (計画は内蔵エンジン専用)。音声は書かれる |
+| `CACHE_READ_FAILED` / `CACHE_WRITE_FAILED` | warning | ディスクキャッシュの読み書きに失敗した (描画は成功) |
 
 `--diagnostics compact` を付けると、警告を 1 行ずつ次の形式で出します (`speak` 系は標準エラー、`validate` は標準出力)。
 
@@ -82,8 +84,8 @@
 | `-o, --output FILE\|-` | WAV の出力先 (既定 `kongyoroid-<kind>-<hash>.wav`)。`-` で標準出力 |
 | `--force` | 既存ファイルを置き換える (同一内容なら `--force` 無しでも成功し `unchanged: true`) |
 | `--play` | 書き出し後にシステムプレイヤーで再生 |
-| `--plan-out FILE\|-` | 合成計画 (読み・音素・時刻) も JSON で書く |
-| `--dry-run` | 検証と計画だけ (出力は `validate` と同じ) |
+| `--plan-out FILE\|-` | 合成計画 (読み・音素・時刻) も JSON で書く。内蔵エンジン専用で、VOICEVOX の描画では `PLAN_UNAVAILABLE` の警告になる |
+| `--dry-run` | 検証と計画だけ (出力は `validate` と同じ)。`--stream` と併用しても何も書かない |
 | `--diagnostics json\|compact` | 警告の出し方 |
 
 環境変数: `KONGYOROID_ENGINE` `KONGYOROID_VOICE` `KONGYOROID_DICTIONARY` `KONGYOROID_CACHE_DIR` `KONGYOROID_ENDPOINT` (別名 `VOICEVOX_URL`) `KONGYOROID_SPEAKER` `KONGYOROID_SINGER` `KONGYOROID_TEACHER`。
@@ -96,8 +98,8 @@ kongyoroid speak (--text TEXT | --input FILE|-) [options]
 
 | フラグ | 内容 |
 | --- | --- |
-| `-t, --text TEXT` / `-i, --input FILE\|-` | 読み上げるテキスト / ファイル・標準入力から |
-| `--kana NOTATION` | かな記法で発音を指定 (テキスト解析を飛ばす) |
+| `-t, --text TEXT` / `-i, --input FILE\|-` | 読み上げるテキスト / ファイル・標準入力から。入力が `{` で始まればリクエスト JSON (`kind: "speech"`) として読み、フラグが上書きする。両方は指定できない |
+| `--kana NOTATION` | かな記法で発音を指定 (テキスト解析を飛ばす)。`--text` を省くと `--kana` がテキストを兼ねる |
 | `--dict-entry SURFACE=READING[:ACCENT]` | 一回限りの読み指定 (複数可) |
 | `--no-strict-reading` | 読めない文字を警告付きで飛ばす |
 | `--speed N` `--pitch-semitones N` `--pitch N` `--intonation N` | 話速 0.25–4、半音シフト −24..24、VOICEVOX 互換 pitchScale、抑揚 0–3 |
@@ -107,24 +109,32 @@ kongyoroid speak (--text TEXT | --input FILE|-) [options]
 | `--no-upspeak` | 疑問文末を上げない |
 | `--sample-rate HZ` `--seed N` | 8000–48000 Hz、ノイズの種 |
 | `--speaker ID\|NAME` `--split sentence\|paragraph\|none` | VOICEVOX のスタイルと分割単位 |
-| `--stream` `--format wav\|pcm\|ndjson` `--progress` | ストリーミング (後述) |
+| `--stream` `--format wav\|pcm\|ndjson` `--progress` `--flush-ms N` | ストリーミング (後述) |
 
 出力 (1 行):
 
 ```json
-{"ok":true,"path":"/work/out.wav","written":true,"unchanged":false,"engine":"formant","engineVersion":"formant-2.0.0","kind":"speech","voice":"neutral","styles":{},"kana":"テ'_ストガ/サン'ゲン/シッパイ/シマ'_シタ。","chunks":1,"cached":false,"sha256":"…","requestHash":"…","bytes":108942,"sampleRate":24000,"channels":1,"frames":54449,"durationSeconds":2.269,"peak":0.4772,"rms":0.081,"limitedSamples":0,"elapsedMs":479.55,"timings":{"readMs":406.49,"planMs":3.86,"renderMs":66.94,"encodeMs":0,"totalMs":479.55},"warnings":[],"adjustments":[]}
+{"ok":true,"path":"/work/out.wav","written":true,"unchanged":false,"engine":"formant","engineVersion":"formant-2.1.0","kind":"speech","voice":"neutral","styles":{},"kana":"テ'_ストガ/サン'ゲン/シッパイ/シマ'_シタ。ロ'グヲ/カクニン/_シテ/クダサ'イ。","chunks":2,"cached":false,"sha256":"…","requestHash":"…","bytes":209622,"sampleRate":24000,"channels":1,"frames":104789,"durationSeconds":4.366,"peak":0.7198,"rms":0.0925,"limitedSamples":0,"elapsedMs":1092.74,"timings":{"readMs":887.4,"planMs":18.6,"renderMs":179.24,"encodeMs":0,"totalMs":1092.74},"warnings":[],"adjustments":[]}
 ```
+
+`chunks` は文の数です。文は `。！？` と改行で区切られ、直後の閉じ括弧 (`」』）` など) は前の文に付きます。
 
 `--output -` の時は WAV バイト列が標準出力、同じ JSON (`"output":"stdout"`) が標準エラーに出ます。
 
 ### ストリーミング (`--stream`)
 
-テキストを `。！？` と改行で文に分け、文が確定するたびに合成します。次の文の計画を先読みするので途切れません。
+テキストを `。！？` と改行で文に分け、文が確定するたびに合成します。次の文の計画を先読みするので途切れません。記号だけの断片 (`…` や `！` のみ) は読み飛ばします。
+
+| フラグ | 内容 |
+| --- | --- |
+| `--format wav\|pcm\|ndjson` | 標準出力の形式 (下表)。ファイル出力は常に WAV |
+| `--progress` | 文ごとの `sentence` イベントを標準エラーに出す |
+| `--flush-ms N` | 文末記号が届かないまま N ms (1–600000) 入力が止まったら、溜まっている断片を 1 文として読む。既定は文末記号か改行が来るまで待つ |
 
 | `--format` | 標準出力の内容 |
 | --- | --- |
 | `pcm` | 生の s16le モノラル PCM。サンプルレートは `--sample-rate` (既定 24000) |
-| `wav` | 長さ未確定 (`0xFFFFFFFF`) ヘッダー付き WAV。パイプ再生向け |
+| `wav` | 長さ未確定 (`0xFFFFFFFF`) ヘッダー付き WAV。パイプ再生向け。`inspect` はこのヘッダーのまま途中で切れたファイルも読める |
 | `ndjson` | 1 行 1 イベント (下記) |
 
 NDJSON のイベント:
@@ -135,7 +145,7 @@ NDJSON のイベント:
 {"type":"end","ok":true,"operation":"speak","stream":true,"format":"ndjson","output":"stdout","sentences":2,"frames":51432,"durationSeconds":2.143,"sampleRate":24000}
 ```
 
-`-o FILE` と組み合わせるとファイルへ書き、終了時にヘッダーを書き戻します。`--progress` で文ごとの JSON 行を標準エラーに出します。文間のポーズは次の文の先頭に付き、`--post-pause` は最後に 1 回だけ付くので、一括合成と同じ尺になります。
+`-o FILE` と組み合わせるとファイルへ書き、終了時にヘッダーを書き戻します (入力が空でも 0 フレームの WAV を書き、`"written": true` を返します)。文間のポーズは次の文の先頭に付き、`--post-pause` は最後に 1 回だけ付くので、一括合成と同じ尺になります。`--stream --dry-run` は入力全体を `validate` して何も書きません。
 
 ## sing
 
@@ -148,8 +158,8 @@ kongyoroid sing (--lyrics KANA --melody NOTES | --mml MML [--lyrics KANA] | --in
 | `--lyrics KANA` | かな歌詞。有音の音符 1 つにつき 1 モーラ消費 |
 | `--melody NOTES` | 空白区切り: 音名 (`C4` `F#4` `Bb3`)、MIDI 番号、`R` 休符、`~` タイ、`~G4` メリスマ、`\|` は無視 |
 | `--beats LIST` | 音符ごとの拍 (`"1 1 2 0.5"`)。1 つだけなら全音符に適用。既定 1 |
-| `--mml MML` | MML 譜 (`t120 o4 l8 c d e f g4 r4 e&e`)。`t` テンポ、`o` オクターブ、`< >`、`l` 既定長、`v` ベロシティ、`n60` MIDI、`r` 休符、`&` タイ/メリスマ、`[きゃ]` 歌詞、付点 |
-| `-i, --input FILE\|-` | 音符リストを含むリクエスト JSON (フラグが優先) |
+| `--mml MML` | MML 譜 (`t120 o4 l8 c d e f g4 r4 e&e`)。`t` テンポ、`o` オクターブ、`< >`、`l` 既定長 (1–256)、`v` ベロシティ、`n60` MIDI、`r` 休符、`&` タイ/メリスマ、`[きゃ]` 歌詞、付点 |
+| `-i, --input FILE\|-` | 音符リストを含むリクエスト JSON (フラグが優先)。譜面の指定が 1 つも無いと `INVALID_INPUT` (`$flags.melody`) |
 | `--tempo BPM` `--transpose N` | 20–400 (既定 120 か MML の値)、半音 −48..48 |
 | `--vibrato-depth CENTS` `--vibrato-rate HZ` `--vibrato-delay-ms MS` `--vibrato-fade-ms MS` | ビブラート (既定 30 cent、5.5 Hz、180 ms 後から 250 ms かけて) |
 | `--portamento-ms MS` | つながった音符間のピッチ移行 (既定 60、0 で階段) |
@@ -182,7 +192,7 @@ kongyoroid validate (--input FILE|- | --text TEXT | --lyrics KANA --melody NOTES
 kongyoroid plan     (--input FILE|- | --text TEXT | --lyrics KANA --melody NOTES | --mml MML) [--detail summary|phonemes|acoustics]
 ```
 
-`render` は `kongyoroid schema` の JSON Schema に従うリクエストを描画します。`validate` は描画せず次を返します。
+`render` は `kongyoroid schema` の JSON Schema に従うリクエストを描画します。`--input` に JSON を渡したときも、`--engine` `--voice` に加えて読み上げなら `--kana` `--dict-entry` などの読み上げフラグ、歌唱なら `--tempo` などの歌唱フラグがリクエストの値を上書きします (`--dict-entry` はリクエストの `dictionary` に追加)。`validate` は描画せず次を返します。
 
 ```json
 {"ok":true,"operation":"validate","engine":"formant","kind":"speech","renderable":true,"estimate":{"durationSeconds":0.588,"frames":14108,"wavBytes":28260,"sampleRate":24000},"voice":"neutral","reading":{"kana":"カンジ'。","frontend":"notation","moraCount":3},"notes":null,"warnings":[],"adjustments":[],"requestHash":"…","planHash":"…","request":{…}}
@@ -242,9 +252,9 @@ kongyoroid dict <list|add|update|delete|check> [--scope local|voicevox] [--dicti
 
 ## inspect / play / cache
 
-- `kongyoroid inspect FILE.wav [--pitch-track] [--window-ms N]`: サンプルレート、尺、ピーク、RMS、クリップ数、F0 推定 (`medianHz` / 範囲 / 有声率)。`--pitch-track` で窓ごとの F0。
-- `kongyoroid play FILE.wav`: afplay / paplay / aplay / ffplay / play / PowerShell の順に試します。
-- `kongyoroid cache <stats|prune|clear> [--cache-dir DIR] [--max-bytes N] [--max-entries N] [--dry-run]`: `DIR/kongyoroid-cache/` の中だけを対象にします。
+- `kongyoroid inspect FILE.wav [--pitch-track] [--window-ms N]`: サンプルレート、尺、ピーク、RMS、クリップ数、F0 推定 (`medianHz` / 範囲 / 有声率)。`--pitch-track` で窓ごとの F0。RIFF サイズが実際より大きいファイルや、ストリーミング用ヘッダーのまま途中で切れたファイルも読みます (データチャンクが宣言より短いものは `ENGINE_PROTOCOL`)。
+- `kongyoroid play FILE.wav`: afplay / paplay / aplay / ffplay / play / PowerShell の順に試し、失敗したプレイヤーは飛ばして次を試します。どれも再生できなければ `PLAYER_UNAVAILABLE` (試した結果が `detail.attempts`)、ファイルが無ければ `IO_ERROR`。
+- `kongyoroid cache <stats|prune|clear> [--cache-dir DIR] [--max-bytes N] [--max-entries N] [--dry-run]`: `DIR/kongyoroid-cache/` の中だけを対象にします。`prune` は `--max-bytes` か `--max-entries` のどちらかが必須で、`--dry-run` なら `wouldRemove` に消す件数を返します。
 
 ## VOICEVOX を使う場合
 
