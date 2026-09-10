@@ -971,6 +971,11 @@ export class Kongyoroid {
     const parsed = this.parse({ ...input, kind: "speech", text: "placeholder" });
     const request = parsed.request;
     if (request.kind !== "speech") invalid("$.kind", "Streaming synthesis needs a speech request.");
+    if (request.kana !== undefined) {
+      invalid("$.kana", "Streaming synthesis reads every sentence from the streamed text; kana cannot be given.", {
+        hint: "Drop kana and use a dictionary for readings, or synthesize the whole text at once with kana.",
+      });
+    }
     if (request.engine === "voicevox") {
       invalid("$.engine", "Streaming synthesis is only available with the formant engine.", {
         hint: 'Set engine to "formant" (or "auto", which streams with the built-in engine) and drop the speaker.',

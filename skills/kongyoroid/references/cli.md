@@ -69,14 +69,14 @@ kongyoroid speak (--text TEXT | --input FILE|- | --kana NOTATION) [options]
 | フラグ | 内容 |
 | --- | --- |
 | `-t, --text TEXT` | 読み上げるテキスト。**先頭が `-` の文字列は `--text=…` の形で渡す** (そうしないと引数が曖昧だと拒否される) |
-| `-i, --input FILE\|-` | ファイル / 標準入力から読む。内容が `{` で始まればリクエスト JSON (`kind: "speech"`) として読み、フラグが上書きする。`--text` との併用は不可 |
-| `--kana NOTATION` | かな記法で発音を指定 (テキスト解析を飛ばす)。`--text` を省くと `--kana` がテキストを兼ねる |
+| `-i, --input FILE\|-` | ファイル / 標準入力から読む。内容が `{` で始まればリクエスト JSON (`kind: "speech"`) として読み、フラグが上書きする (`--stream` でも同じ)。`--text` との併用は不可 |
+| `--kana NOTATION` | かな記法で発音を指定 (テキスト解析を飛ばす)。`--text` を省くと `--kana` がテキストを兼ねる。`--stream` とは併用不可 (`$flags.kana`) |
 | `--dict-entry SURFACE=READING[:ACCENT]` | 一回限りの読み指定。繰り返し可。JSON 入力の `dictionary` には追記される |
 | `--no-strict-reading` | 読めない文字を警告付きで飛ばす (原稿の欠落なので常用しない) |
 | `--speed N` | 0.25–4 (既定 1)。子音・母音・ポーズを一様に伸縮 |
 | `--pitch-semitones N` | 基本ピッチの半音シフト −24..24 |
 | `--intonation N` | 抑揚の幅 0–3 (既定 1)。0 でほぼ平坦 |
-| `--volume N` / `--gain-db N` | 出力レベル (線形 0–3 / dB −60..12)。**排他** |
+| `--volume N` / `--gain-db N` | 出力レベル (線形 0–3 / dB −60..12)。**排他**。JSON 入力にもう一方があればフラグ側が置き換える (`--pitch` / `--pitch-semitones` も同様) |
 | `--breathiness N` | 声門の張り −1..1.5。正で息っぽく |
 | `--pre-pause S` `--post-pause S` | 前後の無音 (既定 0.1 秒ずつ) |
 | `--pause-length S` `--pause-scale N` | `、` の絶対長 / 全ポーズの倍率 |
@@ -110,13 +110,13 @@ kongyoroid speak (--text TEXT | --input FILE|- | --kana NOTATION) [options]
 
 ### ストリーミング (`--stream`)
 
-`。！？` と改行で文に分け、文が確定するたびに合成する。次の文を先読みするので途切れない。文間ポーズは次の文の先頭に付き、`--post-pause` は最後に 1 回だけ付く。記号だけの断片 (`…` や `！` のみ) は読み飛ばす。
+`。！？` と改行で文に分け、文が確定するたびに合成する。次の文を先読みするので途切れない。文間ポーズは次の文の先頭に付き、`--post-pause` は最後に 1 回だけ付く。`--input` が `{` で始まればリクエスト JSON として読み、その `text` を流す (`--kana` は不可)。読めるかどうかはフロントエンドが決め、読みが得られない文 (`…` `！` 絵文字だけなど) は一括合成と同じく読み飛ばす。最後まで 1 文も読めなければ一括合成と同じ `INVALID_INPUT` (`$.text`) になる。
 
 | フラグ | 内容 |
 | --- | --- |
 | `--format wav\|pcm\|ndjson` | 標準出力の形式 (下表)。`-o FILE` なら常に WAV |
 | `--progress` | 文ごとの `sentence` イベントを標準エラーに出す |
-| `--flush-ms N` | 文末記号が届かないまま N ms (1–600000) 入力が止まったら、溜まっている断片を 1 文として読む。既定は文末記号か改行が来るまで待つ |
+| `--flush-ms N` | 文末記号が届かないまま N ms (1–600000) 入力が止まったら、溜まっている断片を 1 文として読む。時間は最後の入力から数える (前の文の合成中も進む)。既定は文末記号か改行が来るまで待つ |
 
 | `--format` | 標準出力 |
 | --- | --- |
@@ -151,10 +151,10 @@ kongyoroid sing (--lyrics KANA --melody NOTES | --mml MML [--lyrics KANA] | --in
 | `--melody NOTES` | 空白区切り。音名 (`C4` `F#4` `Bb3`)、MIDI 番号、`R` 休符、`~` タイ、`~G4` メリスマ、`\|` は無視 |
 | `--beats LIST` | 音符ごとの拍 (`"1 1 2 0.5"`)。1 つだけなら全音符に適用。既定 1。範囲 0.015625–64 |
 | `--mml MML` | MML 譜 (`t120 o4 l8 c d e f g4 r4 e&e`)。音長は 1–256 |
-| `-i, --input FILE\|-` | 音符リストを含むリクエスト JSON。フラグが優先。譜面の指定が 1 つも無いと `INVALID_INPUT` (`$flags.melody`) |
+| `-i, --input FILE\|-` | 音符リストを含むリクエスト JSON。フラグが優先 (`--volume` / `--gain-db` は JSON のもう一方を置き換える)。譜面の指定が 1 つも無いと `INVALID_INPUT` (`$flags.melody`) |
 | `--tempo BPM` | 20–400 (既定 120、MML に `t` があればその値) |
 | `--transpose N` | 半音 −48..48 |
-| `--vibrato-depth CENTS` `--vibrato-rate HZ` `--vibrato-delay-ms MS` `--vibrato-fade-ms MS` | 既定 30 cent / 5.5 Hz / 180 ms 後から 250 ms かけて。depth 0 で無効 |
+| `--vibrato-depth CENTS` `--vibrato-rate HZ` `--vibrato-delay-ms MS` `--vibrato-fade-ms MS` | 既定 30 cent / 5.5 Hz / 180 ms 後から 250 ms かけて。depth 0 で無効。JSON 入力の `vibrato` オブジェクトや `vibratoDepth` / `vibratoRate` には該当フィールドだけ上書きして混ぜる |
 | `--portamento-ms MS` | つながった音符間のピッチ移行 (既定 60、0 で階段状) |
 | `--scoop-cents N` `--scoop-ms MS` | フレーズ頭のしゃくり |
 | `--no-consonant-compression` | 子音を短縮せず `NOTE_TOO_SHORT` で失敗させる |

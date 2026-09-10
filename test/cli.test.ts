@@ -6,6 +6,7 @@ import { after, before, test } from "node:test";
 import { COMMANDS } from "../src/cli/help.ts";
 import { inspectWav } from "../src/wav.ts";
 import { VERSION } from "../src/version.ts";
+import type { CliResult } from "./helpers/cli.ts";
 import { allJson, lastJson, list, pick, record, runCli } from "./helpers/cli.ts";
 import { MockEngine } from "./helpers/mock-engine.ts";
 
@@ -502,6 +503,83 @@ test("JSON requests on stdin accept the same flags as --text, and sing without n
   assert.equal(noNotes.code, 2);
   assert.equal(pick(lastJson(noNotes.stderr), "error", "path"), "$flags.melody");
   assert.ok(String(pick(lastJson(noNotes.stderr), "error", "hint")).includes("--mml"));
+});
+
+test("flags replace their exclusive counterpart in a JSON request, and vibrato flags merge into vibrato objects", async () => {
+  const speech = JSON.stringify({ kind: "speech", text: "あ", volume: 0.5, pitch: 0.1 });
+  const gain = await runCli(["validate", "--input", "-", "--gain-db=-6", "--pitch-semitones", "3"], { input: speech });
+  assert.equal(gain.code, 0, gain.stderr);
+  const resolved = record(lastJson(gain.stdout)["request"]);
+  assert.ok(Math.abs(Number(resolved["volume"]) - 10 ** (-6 / 20)) < 1e-9);
+  assert.equal(resolved["pitchSemitones"], 3);
+  assert.equal(resolved["pitch"], undefined);
+  const volume = await runCli(["validate", "--input", "-", "--volume", "2", "--pitch", "0.05"], {
+    input: JSON.stringify({ kind: "speech", text: "あ", gainDb: -6, pitchSemitones: 2 }),
+  });
+  assert.equal(volume.code, 0, volume.stderr);
+  assert.equal(pick(lastJson(volume.stdout), "request", "volume"), 2);
+  assert.equal(pick(lastJson(volume.stdout), "request", "pitch"), 0.05);
+  assert.equal(pick(lastJson(volume.stdout), "request", "pitchSemitones"), 0);
+  const both = await runCli(["validate", "--text", "あ", "--volume", "1", "--gain-db", "0"]);
+  assert.equal(both.code, 2);
+  assert.equal(pick(lastJson(both.stderr), "error", "path"), "$flags.gain-db");
+  const song = { kind: "song", notes: { lyrics: "あ", melody: "C4" } };
+  const rate = await runCli(["sing", "--dry-run", "--input", "-", "--vibrato-rate", "4", "--gain-db=-3"], {
+    input: JSON.stringify({ ...song, vibrato: { depthCents: 20, delayMs: 50 }, volume: 0.5 }),
+  });
+  assert.equal(rate.code, 0, rate.stderr);
+  assert.equal(pick(lastJson(rate.stdout), "request", "vibratoDepth"), 20);
+  assert.equal(pick(lastJson(rate.stdout), "request", "vibratoRate"), 4);
+  assert.equal(pick(lastJson(rate.stdout), "request", "vibratoDelayMs"), 50);
+  assert.ok(Math.abs(Number(pick(lastJson(rate.stdout), "request", "volume")) - 10 ** (-3 / 20)) < 1e-9);
+  const fade = await runCli(["sing", "--dry-run", "--input", "-", "--vibrato-fade-ms", "100"], {
+    input: JSON.stringify({ ...song, vibratoDepth: 10, vibratoRate: 6 }),
+  });
+  assert.equal(fade.code, 0, fade.stderr);
+  assert.equal(pick(lastJson(fade.stdout), "request", "vibratoDepth"), 10);
+  assert.equal(pick(lastJson(fade.stdout), "request", "vibratoRate"), 6);
+  assert.equal(pick(lastJson(fade.stdout), "request", "vibratoFadeMs"), 100);
+  const depth = await runCli(["sing", "--dry-run", "--input", "-", "--vibrato-depth", "0"], {
+    input: JSON.stringify({ ...song, vibratoDepth: 10 }),
+  });
+  assert.equal(depth.code, 0, depth.stderr);
+  assert.equal(pick(lastJson(depth.stdout), "request", "vibratoDepth"), 0);
+});
+
+test("--stream reads a request JSON from --input, rejects --kana, and treats unreadable text like batch mode", async () => {
+  const request = { kind: "speech", text: "一つ目。二つ目。", voice: "male", speed: 0.5 };
+  const stream = (args: readonly string[], input: string): Promise<CliResult> =>
+    runCli(["speak", "--input", "-", "--stream", "-o", "-", "--format", "ndjson", ...args], { input });
+  const slow = await stream([], JSON.stringify(request));
+  assert.equal(slow.code, 0, slow.stderr);
+  const texts = (result: CliResult): unknown[] =>
+    allJson(result.stdout)
+      .filter((event) => event["type"] === "sentence")
+      .map((event) => String(event["text"]).trim());
+  assert.deepEqual(texts(slow), ["一つ目。", "二つ目。"]);
+  const fast = await stream(["--speed", "2"], JSON.stringify(request));
+  assert.equal(fast.code, 0, fast.stderr);
+  assert.deepEqual(texts(fast), ["一つ目。", "二つ目。"]);
+  assert.ok(Number(lastJson(fast.stdout)["durationSeconds"]) < Number(lastJson(slow.stdout)["durationSeconds"]) / 2);
+  const song = await stream([], JSON.stringify({ kind: "song", notes: { lyrics: "あ", melody: "C4" } }));
+  assert.equal(song.code, 2);
+  assert.equal(pick(lastJson(song.stderr), "error", "path"), "$.kind");
+  const noText = await stream([], JSON.stringify({ kind: "speech", voice: "male" }));
+  assert.equal(noText.code, 2);
+  assert.equal(pick(lastJson(noText.stderr), "error", "path"), "$.text");
+  const kana = await runCli(["speak", "--text", "あ", "--kana", "ア'", "--stream", "-o", "-", "--format", "pcm"]);
+  assert.equal(kana.code, 2);
+  assert.equal(pick(lastJson(kana.stderr), "error", "path"), "$flags.kana");
+  const unreadable = await runCli(["speak", "--input", "-", "--stream", "-o", "-", "--format", "wav"], {
+    input: "🎉🎉🎉\n",
+  });
+  assert.equal(unreadable.code, 2);
+  assert.equal(pick(lastJson(unreadable.stderr), "error", "path"), "$.text");
+  assert.equal(unreadable.stdoutBytes.length, 0);
+  const mixed = await stream([], "完了。\n🎉🎉🎉\n次。\n");
+  assert.equal(mixed.code, 0, mixed.stderr);
+  assert.deepEqual(texts(mixed), ["完了。", "次。"]);
+  assert.equal(lastJson(mixed.stdout)["sentences"], 2);
 });
 
 test("cache prune needs a limit, and --dry-run reports what would be removed", async () => {

@@ -124,6 +124,28 @@ function speechRequestFromFlags(values: Values, text: string): JsonObject {
   return withSpeechFlags(values, { kind: "speech", text });
 }
 
+type ExclusiveFlag = "volume" | "gain-db" | "pitch" | "pitch-semitones";
+
+function assignExclusive(
+  request: JsonObject,
+  values: Values,
+  first: { readonly flag: ExclusiveFlag; readonly key: string },
+  second: { readonly flag: ExclusiveFlag; readonly key: string },
+): void {
+  const a = numberFlag(values, first.flag);
+  const b = numberFlag(values, second.flag);
+  if (a !== undefined && b !== undefined)
+    invalid(`$flags.${second.flag}`, `Use either --${first.flag} or --${second.flag}, not both.`);
+  if (a !== undefined) {
+    request[first.key] = a;
+    delete request[second.key];
+  }
+  if (b !== undefined) {
+    request[second.key] = b;
+    delete request[first.key];
+  }
+}
+
 function withSpeechFlags(values: Values, base: JsonObject): JsonObject {
   const request: JsonObject = { ...base, kind: "speech" };
   assign(request, "engine", values.engine);
@@ -137,11 +159,9 @@ function withSpeechFlags(values: Values, base: JsonObject): JsonObject {
   if (values["strict-reading"] === false) request["strictReading"] = false;
   assign(request, "speaker", styleFlag(values, "speaker"));
   assign(request, "speed", numberFlag(values, "speed"));
-  assign(request, "pitch", numberFlag(values, "pitch"));
-  assign(request, "pitchSemitones", numberFlag(values, "pitch-semitones"));
+  assignExclusive(request, values, { flag: "pitch", key: "pitch" }, { flag: "pitch-semitones", key: "pitchSemitones" });
   assign(request, "intonation", numberFlag(values, "intonation"));
-  assign(request, "volume", numberFlag(values, "volume"));
-  assign(request, "gainDb", numberFlag(values, "gain-db"));
+  assignExclusive(request, values, { flag: "volume", key: "volume" }, { flag: "gain-db", key: "gainDb" });
   assign(request, "breathiness", numberFlag(values, "breathiness"));
   assign(request, "prePause", numberFlag(values, "pre-pause"));
   assign(request, "postPause", numberFlag(values, "post-pause"));
@@ -152,6 +172,31 @@ function withSpeechFlags(values: Values, base: JsonObject): JsonObject {
   assign(request, "sampleRate", numberFlag(values, "sample-rate"));
   assign(request, "seed", numberFlag(values, "seed"));
   return request;
+}
+
+function applyVibratoFlags(request: JsonObject, values: Values, base: JsonObject): void {
+  const depth = numberFlag(values, "vibrato-depth");
+  const rate = numberFlag(values, "vibrato-rate");
+  const delay = numberFlag(values, "vibrato-delay-ms");
+  const fade = numberFlag(values, "vibrato-fade-ms");
+  const existing = isObject(base["vibrato"]) ? base["vibrato"] : undefined;
+  if (existing === undefined && delay === undefined && fade === undefined) {
+    assign(request, "vibratoDepth", depth);
+    assign(request, "vibratoRate", rate);
+    return;
+  }
+  const vibrato: JsonObject = { ...existing };
+  if (existing === undefined) {
+    assign(vibrato, "depthCents", base["vibratoDepth"]);
+    assign(vibrato, "rateHz", base["vibratoRate"]);
+    delete request["vibratoDepth"];
+    delete request["vibratoRate"];
+  }
+  assign(vibrato, "depthCents", depth);
+  assign(vibrato, "rateHz", rate);
+  assign(vibrato, "delayMs", delay);
+  assign(vibrato, "fadeMs", fade);
+  request["vibrato"] = vibrato;
 }
 
 function songRequestFromFlags(values: Values, base: JsonObject): JsonObject {
@@ -188,23 +233,9 @@ function songRequestFromFlags(values: Values, base: JsonObject): JsonObject {
   assign(request, "singer", styleFlag(values, "singer"));
   assign(request, "teacher", styleFlag(values, "teacher"));
   assign(request, "transpose", numberFlag(values, "transpose"));
-  assign(request, "volume", numberFlag(values, "volume"));
-  assign(request, "gainDb", numberFlag(values, "gain-db"));
+  assignExclusive(request, values, { flag: "volume", key: "volume" }, { flag: "gain-db", key: "gainDb" });
   assign(request, "breathiness", numberFlag(values, "breathiness"));
-  assign(request, "vibratoDepth", numberFlag(values, "vibrato-depth"));
-  assign(request, "vibratoRate", numberFlag(values, "vibrato-rate"));
-  const delay = numberFlag(values, "vibrato-delay-ms");
-  const fade = numberFlag(values, "vibrato-fade-ms");
-  if (delay !== undefined || fade !== undefined) {
-    const vibrato: JsonObject = {};
-    assign(vibrato, "delayMs", delay);
-    assign(vibrato, "fadeMs", fade);
-    assign(vibrato, "depthCents", numberFlag(values, "vibrato-depth"));
-    assign(vibrato, "rateHz", numberFlag(values, "vibrato-rate"));
-    delete request["vibratoDepth"];
-    delete request["vibratoRate"];
-    request["vibrato"] = vibrato;
-  }
+  applyVibratoFlags(request, values, base);
   assign(request, "portamentoMs", numberFlag(values, "portamento-ms"));
   assign(request, "scoopCents", numberFlag(values, "scoop-cents"));
   assign(request, "scoopMs", numberFlag(values, "scoop-ms"));
@@ -340,8 +371,66 @@ async function runPlan(agent: Kongyoroid, values: Values, signal: AbortSignal): 
   await emit(result);
 }
 
+async function* single(text: string): AsyncGenerator<string, void, void> {
+  yield text;
+}
+
+async function* prepend(
+  head: readonly string[],
+  iterator: AsyncIterator<string, void, void>,
+): AsyncGenerator<string, void, void> {
+  for (const chunk of head) yield chunk;
+  try {
+    while (true) {
+      const next = await iterator.next();
+      if (next.done === true) return;
+      yield next.value;
+    }
+  } finally {
+    await iterator.return?.();
+  }
+}
+
+async function streamInput(
+  values: Values,
+  signal: AbortSignal,
+): Promise<{ readonly request: JsonObject; readonly source: AsyncIterable<string> }> {
+  const fromFlags = (): JsonObject => {
+    const request = speechRequestFromFlags(values, "placeholder");
+    delete request["text"];
+    return request;
+  };
+  if (values.text !== undefined) return { request: fromFlags(), source: single(values.text) };
+  const iterator = readChunks(values.input ?? "-", signal)[Symbol.asyncIterator]();
+  const head: string[] = [];
+  let leading = "";
+  while (leading.trim().length === 0) {
+    const next = await iterator.next();
+    if (next.done === true) break;
+    head.push(next.value);
+    leading += next.value;
+  }
+  if (!leading.trimStart().startsWith("{")) return { request: fromFlags(), source: prepend(head, iterator) };
+  for (let next = await iterator.next(); next.done !== true; next = await iterator.next()) head.push(next.value);
+  const json = object(parseJson(head.join("")), "$");
+  if (json["kind"] !== undefined && json["kind"] !== "speech")
+    invalid("$.kind", "speak accepts only speech requests; use sing or render for songs.");
+  const text = json["text"];
+  if (typeof text !== "string")
+    invalid("$.text", "A request JSON given to --stream needs a text string to stream.", {
+      hint: 'Example: {"kind":"speech","text":"一文目。二文目。","voice":"soft"}',
+    });
+  const request = withSpeechFlags(values, json);
+  delete request["text"];
+  return { request, source: single(text) };
+}
+
 async function runSpeakStream(agent: Kongyoroid, values: Values, signal: AbortSignal): Promise<void> {
   if (values.play) invalid("$flags.play", "--play cannot be combined with --stream.");
+  if (values.kana !== undefined)
+    invalid("$flags.kana", "--kana cannot be combined with --stream; streaming reads each sentence from the text.", {
+      hint: "Give readings with --dict-entry SURFACE=READING[:ACCENT], or drop --stream to speak the kana at once.",
+    });
   rejectTextAndInput(values);
   const format = literal(values.format ?? "wav", "$flags.format", ["wav", "pcm", "ndjson"]);
   const output = values.output ?? "-";
@@ -349,14 +438,7 @@ async function runSpeakStream(agent: Kongyoroid, values: Values, signal: AbortSi
     invalid("$flags.format", "Streaming to a file writes WAV; use --output - for pcm or ndjson.");
   const flushRaw = numberFlag(values, "flush-ms");
   const flushMs = flushRaw === undefined ? undefined : integer(flushRaw, "$flags.flush-ms", 1, 600_000);
-  const input = speechRequestFromFlags(values, "placeholder");
-  delete input["text"];
-  const source: AsyncIterable<string> =
-    values.text !== undefined
-      ? (async function* (): AsyncGenerator<string, void, void> {
-          yield values.text ?? "";
-        })()
-      : readChunks(values.input ?? "-", signal);
+  const { request: input, source } = await streamInput(values, signal);
   const events = agent.speakStream(source, input, { signal, ...(flushMs === undefined ? {} : { flushMs }) });
   const stdout = process.stdout;
   let sampleRate = 0;

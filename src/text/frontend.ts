@@ -1,6 +1,7 @@
 import type { Diagnostic, SourceSpan } from "../errors.ts";
 import { KongyoroidError, checkAbort, invalid } from "../errors.ts";
 import { LIMITS } from "../limits.ts";
+import { isObject } from "../validate.ts";
 import { FRONTEND_VERSION } from "../version.ts";
 import type { LocalDictionary } from "./dictionary.ts";
 import { isSpelledReading } from "./lexicon.ts";
@@ -281,6 +282,17 @@ function applyTerminal(phrases: ReadingPhrase[], boundary: BoundaryKind, paragra
   return phrases;
 }
 
+const NOTHING_READABLE = "nothing-readable";
+
+export function isNothingReadable(error: unknown): error is KongyoroidError {
+  return (
+    error instanceof KongyoroidError &&
+    error.code === "INVALID_INPUT" &&
+    isObject(error.detail) &&
+    error.detail["reason"] === NOTHING_READABLE
+  );
+}
+
 export async function readJapanese(text: string, options: ReadOptions = {}): Promise<ReadingPlan> {
   const path = options.path ?? "$.text";
   const frontend = options.frontend ?? (await loadFrontend());
@@ -419,6 +431,7 @@ export async function readJapanese(text: string, options: ReadOptions = {}): Pro
   if (phrases.length === 0) {
     invalid(path, "Text contains nothing readable.", {
       hint: "Give Japanese text (kanji or kana). Symbols and emoji alone produce no speech.",
+      detail: { reason: NOTHING_READABLE },
       repairOptions: [{ action: "provide-kana", description: "Pass a kana reading.", path: "$.kana" }],
     });
   }

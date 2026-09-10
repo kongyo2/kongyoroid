@@ -37,7 +37,7 @@
 | `retryable` / `retryAfterMs` | そのまま再送して直る可能性。formant のエラーはほぼ `false` |
 | `repairOptions[]` | 機械可読な修正案。`action` と対象 `path` |
 | `sourceSpan` / `surface` | 元テキスト内の位置 (Unicode コードポイント、`end` は排他的) と該当文字列 |
-| `detail` | コード固有の構造化情報 (`availableMs` / `requiredMs` / `noteId`、`unreadable[]`、`alignment`、`attempts` など) |
+| `detail` | コード固有の構造化情報 (`availableMs` / `requiredMs` / `noteId`、`unreadable[]`、`alignment`、`attempts`、読める文字が 1 つも無いときの `reason: "nothing-readable"` など) |
 
 ライブラリでは `asKongyoroidError(err)` で同じ形が取れる (`.code` `.path` `.repairOptions` `.toJSON()`)。終了コードは `exitCodeOf(err)`。
 
@@ -148,6 +148,8 @@ IO_ERROR        Refusing to overwrite /work/a.wav: it exists with different cont
 | `IO_ERROR` で止まる | 既存ファイルと内容が違う | 別名で書く。置換を依頼されたときだけ `--force` |
 | 文の切れ目が意図と違う | 文分割は `。！？` と改行が決める。空行は段落として長いポーズになる | `reading` の `sentences[]` で確認し、改行を消すか `、` に置き換える |
 | ストリーミングで最後の断片が出ない | 文末記号が無い断片は入力が閉じるまで待つ | `--flush-ms` (`flushMs`) を付けるか、送信側で `。` を補う |
+| ストリーミングで文が黙って抜ける / 最後に `INVALID_INPUT` (`$.text`) | 読みが得られない文 (絵文字・記号だけ) は一括合成と同じく落ちる。1 文も読めなければ失敗 | `sentence` イベントの `text` で抜けを確認し、原稿側で記号だけの行を消す |
+| `--stream` / `speakStream` で `$flags.kana` `$.kana` | 文ごとに読む仕組みと `kana` は両立しない | 読みは `--dict-entry` / `dictionary` で与えるか、`--stream` を外して全文を `kana` で読む |
 | 1 回あたり 0.7 秒前後かかる | CLI 起動ごとにフロントエンドをロードしている | `batch --input -` かライブラリでプロセスを使い回す |
 | 更新後も古い音声が返る気がする | キャッシュキーに版と辞書ダイジェストが入るので起こらない | 切り分けたいなら `--no-cache` |
 | `cache prune` が何もしない / エラーになる | `--max-bytes` か `--max-entries` が要る | どちらかを付ける。`--dry-run` で `wouldRemove` を先に見る |

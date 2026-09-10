@@ -31,10 +31,10 @@ const OUTPUT_OPTIONS: readonly (readonly [string, string])[] = [
 
 const SPEECH_OPTIONS: readonly (readonly [string, string])[] = [
   ["-t, --text TEXT", "Text to read (kanji, kana, numbers, ASCII words)"],
-  ["-i, --input FILE|-", "Read the text from a file or stdin"],
+  ["-i, --input FILE|-", "Read the text (or a speech request JSON starting with {) from a file or stdin"],
   [
     "--kana NOTATION",
-    "Pronunciation override with optional accent marks: コンニチワ、キョ'ーワ/イ'イ/テ'ンキデ_スネ？",
+    "Pronunciation override with optional accent marks: コンニチワ、キョ'ーワ/イ'イ/テ'ンキデ_スネ？ (not with --stream)",
   ],
   [
     "--dict-entry SURFACE=READING[:ACCENT]",
@@ -45,7 +45,7 @@ const SPEECH_OPTIONS: readonly (readonly [string, string])[] = [
   ["--pitch-semitones N", "Shift the base pitch in semitones (-24..24)"],
   ["--pitch N", "VOICEVOX pitchScale semantics (-1..1, practical ±0.15); not with --pitch-semitones"],
   ["--intonation N", "Pitch-range multiplier 0–3 (default 1)"],
-  ["--volume N | --gain-db N", "Output level (linear 0–3, or dB)"],
+  ["--volume N | --gain-db N", "Output level (linear 0–3, or dB); one replaces the other in a request JSON"],
   ["--breathiness N", "Glottal tension offset -1..1.5 (positive = breathier)"],
   ["--pre-pause S, --post-pause S", "Leading/trailing silence in seconds (default 0.1)"],
   ["--pause-length S, --pause-scale N", "Absolute 、 pause length, and pause multiplier"],
@@ -57,7 +57,10 @@ const SPEECH_OPTIONS: readonly (readonly [string, string])[] = [
 ];
 
 const STREAM_OPTIONS: readonly (readonly [string, string])[] = [
-  ["--stream", "Synthesize sentence by sentence as text arrives (stdin, file, or --text) and emit audio immediately"],
+  [
+    "--stream",
+    "Synthesize sentence by sentence as text arrives (stdin, file, request JSON, or --text) and emit audio immediately",
+  ],
   [
     "--format wav|pcm|ndjson",
     "Stream format for --output -: wav (unknown-length header), pcm (raw s16le mono), ndjson (JSON lines with base64 audio)",
@@ -65,7 +68,7 @@ const STREAM_OPTIONS: readonly (readonly [string, string])[] = [
   ["--progress", "With --stream, print a JSON line per sentence on stderr"],
   [
     "--flush-ms N",
-    "With --stream, speak a pending partial sentence after N ms without new input (default: wait for 。！？ or newline)",
+    "With --stream, speak a pending partial sentence N ms after the last input (default: wait for 。！？ or newline)",
   ],
 ];
 
@@ -78,12 +81,15 @@ const SONG_OPTIONS: readonly (readonly [string, string])[] = [
   ["--tempo BPM", "20–400 (default 120 or the MML tempo)"],
   ["--transpose N", "Semitones -48..48"],
   ["--vibrato-depth CENTS, --vibrato-rate HZ", "Vibrato (default 30 cents, 5.5 Hz; 0 disables)"],
-  ["--vibrato-delay-ms MS, --vibrato-fade-ms MS", "Vibrato onset per sustained vowel"],
+  [
+    "--vibrato-delay-ms MS, --vibrato-fade-ms MS",
+    "Vibrato onset per sustained vowel (merged into a JSON vibrato object)",
+  ],
   ["--portamento-ms MS", "Pitch transition between connected notes (default 60; 0 = step)"],
   ["--scoop-cents N", "Start phrase-initial notes below pitch and slide up"],
   ["--no-consonant-compression", "Fail with NOTE_TOO_SHORT instead of shortening consonants"],
   ["--lead-in S, --lead-out S", "Rests around the score (default 0.16)"],
-  ["--volume N | --gain-db N", "Output level"],
+  ["--volume N | --gain-db N", "Output level; one replaces the other in a request JSON"],
   ["--breathiness N", "Glottal tension offset"],
   ["--sample-rate HZ, --seed N", "Output rate and noise seed"],
   ["--singer ID|NAME, --teacher ID|NAME", "VOICEVOX singing styles (select the voicevox engine)"],

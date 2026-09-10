@@ -99,3 +99,38 @@ test("streaming headers and oversized RIFF sizes are tolerated", () => {
   const truncated = new Uint8Array([...streamingWavHeader(16000), ...new Uint8Array(7)]);
   assert.equal(inspectWav(truncated).frames, 3);
 });
+
+test("extensible fmt chunks are decoded, and a truncated one is a protocol error", () => {
+  const bytes = new Uint8Array(12 + 8 + 40 + 8 + 8);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(0, 0x52494646);
+  view.setUint32(4, bytes.length - 8, true);
+  view.setUint32(8, 0x57415645);
+  view.setUint32(12, 0x666d7420);
+  view.setUint32(16, 40, true);
+  view.setUint16(20, 0xfffe, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, 8000, true);
+  view.setUint32(28, 16000, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  view.setUint16(36, 22, true);
+  view.setUint16(38, 16, true);
+  view.setUint32(40, 4, true);
+  view.setUint16(44, 1, true);
+  view.setUint32(60, 0x64617461);
+  view.setUint32(64, 8, true);
+  assert.equal(inspectWav(bytes).frames, 4);
+  assert.equal(inspectWav(bytes).format, "pcm");
+  const truncated = bytes.subarray(0, 44);
+  assert.throws(
+    () => inspectWav(truncated),
+    (error: unknown) => error instanceof KongyoroidError && error.code === "ENGINE_PROTOCOL",
+  );
+  const short = new Uint8Array(bytes);
+  new DataView(short.buffer).setUint32(16, 18, true);
+  assert.throws(
+    () => inspectWav(short),
+    (error: unknown) => error instanceof KongyoroidError && error.code === "ENGINE_PROTOCOL",
+  );
+});

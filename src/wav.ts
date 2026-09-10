@@ -90,7 +90,10 @@ export function inspectWav(bytes: Uint8Array): WavLayout {
       rate = view.getUint32(start + 4, true);
       align = view.getUint16(start + 12, true);
       bits = view.getUint16(start + 14, true);
-      if (format === 0xfffe && length >= 26) format = view.getUint16(start + 24, true);
+      if (format === 0xfffe) {
+        if (length < 26 || start + 26 > end) malformed("bad fmt chunk");
+        format = view.getUint16(start + 24, true);
+      }
     } else if (tag === DATA) {
       if (dataOffset >= 0) malformed("duplicate data chunk");
       if (start + length > end) malformed(`data chunk declares ${length} bytes past the end of the file`);

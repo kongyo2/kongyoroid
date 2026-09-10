@@ -167,6 +167,10 @@ test("streaming speech yields sentence and audio events through the facade", asy
     () => agent.speakStream((async function* (): AsyncGenerator<string, void, void> {})(), { speaker: 3 }),
     KongyoroidError,
   );
+  assert.throws(
+    () => agent.speakStream((async function* (): AsyncGenerator<string, void, void> {})(), { kana: "ア'" }),
+    (error: unknown) => error instanceof KongyoroidError && error.code === "INVALID_INPUT" && error.path === "$.kana",
+  );
   const auto = new Kongyoroid({ endpoint: DOWN, engine: "auto" });
   const autoKinds: string[] = [];
   for await (const event of auto.speakStream(

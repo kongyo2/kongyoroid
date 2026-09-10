@@ -134,9 +134,10 @@ for await (const ev of agent.speakStream(tokens(), { voice: "soft" }, { flushMs:
 ```
 
 - 文の切れ目は `。！？` と改行 (直後の閉じ括弧は前の文に付く)。次の文を先読みして合成するので途切れない。文間ポーズは次の文の先頭に付き、`postPause` は最後に 1 回だけ付く。
-- 第 2 引数は `text` を除いた `SpeakInput`。`engine` が `"voicevox"` だと `INVALID_INPUT`、`"auto"` は内蔵エンジンで流す。
-- 第 3 引数 `TextStreamOptions`: `flushMs` (文末記号が来ないまま N ms 入力が止まったら溜まった断片を 1 文として読む。省略時は文末記号か入力の終わりまで待つ)、`blockFrames` (`audio` ブロックの長さ、既定は 1/20 秒)、`maxSentenceChars` (既定 2000)、`signal`。
-- 記号だけの断片 (`…` `！` のみ) は読み飛ばす。`flushMs` で切れた断片は文末扱い (`sentence` 境界のポーズ) になる。
+- 第 2 引数は `text` を除いた `SpeakInput`。`engine` が `"voicevox"` だと `INVALID_INPUT`、`"auto"` は内蔵エンジンで流す。`kana` は文ごとに読む仕組みと両立しないので `INVALID_INPUT` (`$.kana`)。読みは `dictionary` で与える。
+- 第 3 引数 `TextStreamOptions`: `flushMs` (文末記号が来ないまま N ms 入力が止まったら溜まった断片を 1 文として読む。時間は最後の入力から数え、前の文の合成中や消費側が遅い間も進む。省略時は文末記号か入力の終わりまで待つ)、`blockFrames` (`audio` ブロックの長さ、既定は 1/20 秒)、`maxSentenceChars` (既定 2000)、`signal`。
+- 読めるかどうかはフロントエンドが決める。`…` `！` や絵文字だけのように読みが得られない文は一括合成が文中で落とすのと同じく読み飛ばし (`sentence` イベントも出ない)、最後まで 1 文も読めなければ一括合成と同じ `INVALID_INPUT` (`$.text`) で終わる。`flushMs` で切れた断片は文末扱い (`sentence` 境界のポーズ) になる。
+- 入力を 1 チャンク先読みし、`signal` は入力待ちの間も効く (中断は入力源の停止に引きずられない)。
 
 **ストリーミングと一括合成は同じ音にはならない。**
 
