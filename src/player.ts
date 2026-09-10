@@ -54,7 +54,7 @@ function attempt(candidate: PlayerCommand, signal?: AbortSignal): Promise<Attemp
       if (error.code === "ENOENT") resolve({ outcome: "missing" });
       else resolve({ outcome: "failed", reason: error.message });
     });
-    child.once("exit", (code, signalName) => {
+    child.once("close", (code, signalName) => {
       signal?.removeEventListener("abort", onAbort);
       if (signal?.aborted) reject(aborted("Playback cancelled."));
       else if (code === 0) resolve({ outcome: "ok" });
