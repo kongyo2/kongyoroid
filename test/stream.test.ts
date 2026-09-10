@@ -53,6 +53,10 @@ test("renderPcmStream produces the same samples as a whole render, in order", as
 test("takeSentences cuts at terminals and at a length limit near a pause", () => {
   assert.deepEqual(takeSentences("一。二？三", 100), { sentences: ["一。", "二？"], rest: "三" });
   assert.deepEqual(takeSentences("改行で\n区切る", 100), { sentences: ["改行で\n"], rest: "区切る" });
+  assert.deepEqual(takeSentences("一。二。", 100, false), { sentences: ["一。"], rest: "二。" });
+  assert.deepEqual(takeSentences("一。二。", 100), { sentences: ["一。", "二。"], rest: "" });
+  assert.deepEqual(takeSentences("「やった！", 100, false), { sentences: [], rest: "「やった！" });
+  assert.deepEqual(takeSentences("「やった！」と", 100, false), { sentences: ["「やった！」"], rest: "と" });
   const long = `${"あ".repeat(30)}、${"い".repeat(30)}`;
   const taken = takeSentences(long, 40);
   assert.equal(taken.sentences[0], `${"あ".repeat(30)}、`);
@@ -114,6 +118,33 @@ test("flushMs speaks a pending fragment after inactivity, and punctuation-only f
     sentences: ["「やった！」", "と言った。"],
     rest: "",
   });
+  assert.deepEqual(await texts(chunks(["「やった！", "」と言った。"], 1)), ["「やった！」", "と言った。"]);
+  assert.deepEqual(await texts(chunks(["「やった！」と言った。"], 1)), ["「やった！」", "と言った。"]);
+  assert.deepEqual(await texts(chunks(["一。", "二。", "三"], 1)), ["一。", "二。", "三"]);
+});
+
+test("a chunk that arrives while the consumer is busy keeps its arrival time for the flushMs deadline", async () => {
+  const request = speech({ text: "x" });
+  const source = (async function* (): AsyncGenerator<string, void, void> {
+    yield "一。あ";
+    yield "いう";
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  })();
+  const texts: string[] = [];
+  let resumedAt = 0;
+  let gapMs = -1;
+  for await (const event of synthesizeTextStream(source, request, { sampleRate: 16000, flushMs: 500 })) {
+    if (event.type !== "sentence") continue;
+    texts.push(event.text);
+    if (event.index === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      resumedAt = performance.now();
+    } else {
+      gapMs = performance.now() - resumedAt;
+    }
+  }
+  assert.deepEqual(texts, ["一。", "あいう"]);
+  assert.ok(gapMs >= 0 && gapMs < 300, `the fragment came ${gapMs.toFixed(0)} ms after the consumer resumed`);
 });
 
 test("the frontend decides what is readable: symbols it reads are spoken, unreadable sentences are dropped", async () => {
@@ -210,21 +241,25 @@ test("text streaming stops with ABORTED when the signal fires", async () => {
   const idle = new AbortController();
   const drained = synthesizeTextStream(
     (async function* (): AsyncGenerator<string, void, void> {
-      yield "一。";
+      yield "一。二";
       await new Promise((resolve) => setTimeout(resolve, 1500));
     })(),
     request,
-    { sampleRate: 16000, signal: idle.signal, flushMs: 10_000 },
+    { sampleRate: 16000, signal: idle.signal, flushMs: 100 },
   );
   const idleStart = performance.now();
+  const flushed: string[] = [];
   await assert.rejects(
     (async () => {
       for await (const event of drained) {
         if (event.type === "end") throw new Error("the stream ended before the abort");
-        if (event.type === "sentence") setTimeout(() => idle.abort(), 80);
+        if (event.type !== "sentence") continue;
+        flushed.push(event.text);
+        if (event.index === 1) setTimeout(() => idle.abort(), 80);
       }
     })(),
     (error: unknown) => error instanceof KongyoroidError && error.code === "ABORTED",
   );
+  assert.deepEqual(flushed, ["一。", "二"]);
   assert.ok(performance.now() - idleStart < 1200, "an abort with nothing buffered is not delayed by the source either");
 });

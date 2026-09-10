@@ -161,7 +161,7 @@ kongyoroid speak --input - --stream -o long.wav --progress
 kongyoroid speak --input - --stream --flush-ms 300 --output - --format pcm
 ```
 
-文の切れ目 (`。！？` と改行) で分割し、次の文を先読みして合成するので、途切れません。文間ポーズは次の文の先頭に付くため、一括合成した場合と同じ長さになります。`--flush-ms N` を付けると、文末記号が届かないまま N ms 入力が止まった時点で溜まっている断片を 1 文として読みます。`--input` が `{` で始まればリクエスト JSON として読んでその `text` を流し、読みが得られない文 (絵文字だけなど) は一括合成と同じく読み飛ばします。ライブラリでは `agent.speakStream(asyncIterable, input, { flushMs })` が `sentence` / `audio` / `end` イベントを返します。
+文の切れ目 (`。！？` と改行) で分割し、次の文を先読みして合成するので、途切れません。チャンクが文末記号で終わるときは閉じ括弧が続くかどうかを次の文字で確かめてから読むので、文の切れ目はチャンクの切り方に依存しません。文間ポーズは次の文の先頭に付くため、一括合成した場合と同じ長さになります。`--flush-ms N` を付けると、文末記号が届かないまま N ms 入力が止まった時点で溜まっている断片を 1 文として読みます。`--input` が `{` で始まればリクエスト JSON として読んでその `text` を流し、読みが得られない文 (絵文字だけなど) は一括合成と同じく読み飛ばします。ライブラリでは `agent.speakStream(asyncIterable, input, { flushMs })` が `sentence` / `audio` / `end` イベントを返します。
 
 ## 内蔵ボイス
 

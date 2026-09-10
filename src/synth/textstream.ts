@@ -38,6 +38,7 @@ const TERMINALS = /[。！？!?\n]/u;
 export function takeSentences(
   buffer: string,
   maxChars: number,
+  complete: boolean = true,
 ): { readonly sentences: string[]; readonly rest: string } {
   const sentences: string[] = [];
   let rest = buffer;
@@ -55,6 +56,7 @@ export function takeSentences(
     }
     let end = match.index + match[0].length;
     while (end < rest.length && (TERMINALS.test(rest[end] ?? "") || isSentenceCloser(rest[end] ?? ""))) end += 1;
+    if (end >= rest.length && !complete) break;
     const sentence = rest.slice(0, end);
     rest = rest.slice(end);
     if (sentence.trim().length > 0) sentences.push(sentence);
@@ -167,10 +169,17 @@ export async function* synthesizeTextStream(
   const queue: string[] = [];
   const flushMs = options.flushMs !== undefined && options.flushMs > 0 ? options.flushMs : undefined;
   const iterator = chunks[Symbol.asyncIterator]();
-  const read = (): Promise<IteratorResult<string, void>> => observed(iterator.next());
+  let arrivedAt = performance.now();
+  const read = (): Promise<IteratorResult<string, void>> =>
+    observed(
+      iterator.next().then((result) => {
+        arrivedAt = performance.now();
+        return result;
+      }),
+    );
   let pending: Promise<IteratorResult<string, void>> | undefined;
   let exhausted = false;
-  let lastInputAt = performance.now();
+  let lastInputAt = arrivedAt;
   try {
     while (!exhausted) {
       checkAbort(options.signal);
@@ -192,10 +201,10 @@ export async function* synthesizeTextStream(
         exhausted = true;
         break;
       }
-      lastInputAt = performance.now();
+      lastInputAt = arrivedAt;
       buffer += result.value;
       pending = read();
-      const taken = takeSentences(buffer, maxChars);
+      const taken = takeSentences(buffer, maxChars, false);
       buffer = taken.rest;
       queue.push(...taken.sentences);
       while (queue.length > 0) {
@@ -213,10 +222,10 @@ export async function* synthesizeTextStream(
       else await closing;
     }
   }
-  const tail = buffer.trim();
-  if (tail.length > 0) {
+  const tail = takeSentences(buffer, maxChars);
+  for (const text of tail.rest.trim().length > 0 ? [...tail.sentences, tail.rest] : tail.sentences) {
     pendingPlan = undefined;
-    yield* emit(tail);
+    yield* emit(text);
   }
   if (index === 0 && unreadable !== undefined) throw unreadable;
   const trailingFrames = index === 0 ? 0 : Math.round(request.postPause * sampleRate);

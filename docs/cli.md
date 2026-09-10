@@ -123,7 +123,7 @@ kongyoroid speak (--text TEXT | --input FILE|-) [options]
 
 ### ストリーミング (`--stream`)
 
-テキストを `。！？` と改行で文に分け、文が確定するたびに合成します。次の文の計画を先読みするので途切れません。`--input` の内容が `{` で始まればリクエスト JSON として読み、その `text` を流します (`--kana` は使えません)。読めるかどうかはフロントエンドが決めます。`…` や `！`、絵文字だけの断片のように読みが得られない文は一括合成と同じく読み飛ばし、最後まで 1 文も読めなければ一括合成と同じ `INVALID_INPUT` (`$.text`) で失敗します。
+テキストを `。！？` と改行で文に分け、文が確定するたびに合成します。次の文の計画を先読みするので途切れません。チャンクが文末記号で終わるときは、閉じ括弧 (`」）` など) が続くかどうかを次の文字で確かめるまでその文を保留します (次のチャンク、`--flush-ms`、入力の終わりで確定)。そのため文の切れ目はチャンクの切り方に依存しません。`--input` の内容が `{` で始まればリクエスト JSON として読み、その `text` を流します (`--kana` は使えません)。読めるかどうかはフロントエンドが決めます。`…` や `！`、絵文字だけの断片のように読みが得られない文は一括合成と同じく読み飛ばし、最後まで 1 文も読めなければ一括合成と同じ `INVALID_INPUT` (`$.text`) で失敗します。
 
 | フラグ | 内容 |
 | --- | --- |
@@ -192,7 +192,7 @@ kongyoroid validate (--input FILE|- | --text TEXT | --lyrics KANA --melody NOTES
 kongyoroid plan     (--input FILE|- | --text TEXT | --lyrics KANA --melody NOTES | --mml MML) [--detail summary|phonemes|acoustics]
 ```
 
-`render` は `kongyoroid schema` の JSON Schema に従うリクエストを描画します。`--input` に JSON を渡したときも、`--engine` `--voice` に加えて読み上げなら `--kana` `--dict-entry` などの読み上げフラグ、歌唱なら `--tempo` などの歌唱フラグがリクエストの値を上書きします (`--dict-entry` はリクエストの `dictionary` に追加)。`validate` は描画せず次を返します。
+`render` は `kongyoroid schema` の JSON Schema に従うリクエストを描画します。`render` がリクエストに上書きできるフラグは `--engine` と `--voice` だけで、それ以外の読み上げ・歌唱フラグは受け付けません (`INVALID_INPUT`)。`validate` と `plan` (および `speak` `sing`) では、`--input` の JSON に対して読み上げなら `--kana` `--dict-entry` などの読み上げフラグ、歌唱なら `--tempo` などの歌唱フラグがリクエストの値を上書きします (`--dict-entry` はリクエストの `dictionary` に追加)。`validate` は描画せず次を返します。
 
 ```json
 {"ok":true,"operation":"validate","engine":"formant","kind":"speech","renderable":true,"estimate":{"durationSeconds":0.588,"frames":14108,"wavBytes":28260,"sampleRate":24000},"voice":"neutral","reading":{"kana":"カンジ'。","frontend":"notation","moraCount":3},"notes":null,"warnings":[],"adjustments":[],"requestHash":"…","planHash":"…","request":{…}}
