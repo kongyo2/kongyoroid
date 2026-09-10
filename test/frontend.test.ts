@@ -78,6 +78,18 @@ test("dictionaries fix readings and accents and report hits with spans", async (
   assert.deepEqual(plan.dictionaryHits[1]?.sourceSpan, { start: 9, end: 19, unit: "unicode-code-point" });
   assert.equal(plan.phrases[0]?.accentSource, "dictionary");
   assert.equal(plan.phrases[0]?.accent, 1);
+  const adjacent = new LocalDictionary();
+  adjacent.upsert({ surface: "3件", reading: "サンケン", accent: 1 });
+  adjacent.upsert({ surface: "失敗", reading: "シッパイ", accent: 0 });
+  const twice = await readJapanese("テストは3件失敗しました。", { dictionary: adjacent });
+  assert.equal(twice.kana, "テ'_ストワ/サ'ンケン/シッパイ/シマ'_シタ。");
+  const inside = new LocalDictionary();
+  inside.upsert({ surface: "件", reading: "ケン", accent: 1 });
+  inside.upsert({ surface: "失敗", reading: "シッパイ", accent: 0 });
+  assert.equal(
+    (await readJapanese("テストは3件失敗しました。", { dictionary: inside })).kana,
+    "テ'_ストワ/サン/ケ'ン/シッパイ/シマ'_シタ。",
+  );
 });
 
 test("unreadable characters fail loudly in strict mode and are skipped with a warning otherwise", async () => {

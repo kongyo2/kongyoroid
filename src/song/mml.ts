@@ -190,7 +190,7 @@ export function parseMml(text: string, path: string = "$.mml"): MmlResult {
       continue;
     }
     invalid(`${path}[${start}]`, `Unexpected character ${JSON.stringify(char)} in MML.`, {
-      hint: "Supported: t120 (tempo), o4 (octave), < > (octave shift), l8 (default length), v12 (velocity), c d e f g a b with + - #, lengths 1–64 and dots, r (rest), & (tie/melisma), n60 (MIDI), [きゃ] (inline lyric).",
+      hint: "Supported: t120 (tempo), o4 (octave), < > (octave shift), l8 (default length), v12 (velocity), c d e f g a b with + - #, lengths 1–256 and dots, r (rest), & (tie/melisma), n60 (MIDI), [きゃ] (inline lyric).",
     });
   }
   if (pendingTie) invalid(`${path}[${chars.length}]`, "MML ends with a dangling &.");

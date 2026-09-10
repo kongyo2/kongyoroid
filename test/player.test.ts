@@ -39,8 +39,14 @@ test(
       await writeFile(join(directory, fake), "#!/bin/sh\necho broken >&2\nexit 3\n");
       await assert.rejects(
         playWav("/nonexistent.wav"),
-        (error: unknown) => error instanceof KongyoroidError && error.message.includes("broken"),
+        (error: unknown) =>
+          error instanceof KongyoroidError && error.code === "PLAYER_UNAVAILABLE" && error.message.includes("broken"),
       );
+      if (process.platform !== "darwin") {
+        await writeFile(join(directory, "ffplay"), "#!/bin/sh\nexit 0\n");
+        await chmod(join(directory, "ffplay"), 0o755);
+        assert.deepEqual(await playWav("/nonexistent.wav"), { player: "ffplay" });
+      }
     } finally {
       process.env["PATH"] = originalPath;
       await rm(directory, { recursive: true, force: true });

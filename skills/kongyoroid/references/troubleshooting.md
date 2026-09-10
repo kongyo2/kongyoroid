@@ -37,7 +37,7 @@
 | `retryable` / `retryAfterMs` | そのまま再送して直る可能性。formant のエラーはほぼ `false` |
 | `repairOptions[]` | 機械可読な修正案。`action` と対象 `path` |
 | `sourceSpan` / `surface` | 元テキスト内の位置 (Unicode コードポイント、`end` は排他的) と該当文字列 |
-| `detail` | コード固有の構造化情報 (`availableMs` / `requiredMs` / `noteId`、`unreadable[]`、`alignment` など) |
+| `detail` | コード固有の構造化情報 (`availableMs` / `requiredMs` / `noteId`、`unreadable[]`、`alignment`、`attempts`、読める文字が 1 つも無いときの `reason: "nothing-readable"` など) |
 
 ライブラリでは `asKongyoroidError(err)` で同じ形が取れる (`.code` `.path` `.repairOptions` `.toJSON()`)。終了コードは `exitCodeOf(err)`。
 
@@ -46,35 +46,33 @@
 | code | 終了 | 意味と直し方 |
 | --- | --- | --- |
 | `INVALID_INPUT` | 2 | 構造・型・範囲の違反。`path` が場所を指す。未知プロパティなら `hint` に許可された全プロパティ名が並ぶ |
-| `UNSUPPORTED_TEXT` | 2 | エンジンが扱えないテキスト |
+| `UNSUPPORTED_TEXT` | 2 | かな専用の場所 (歌詞など) にかな以外の文字が入った。`sourceSpan` が位置 |
 | `UNREADABLE_TEXT` | 2 | フロントエンドに読みがなく、黙って落とされる文字。`kana` を与えるか辞書に登録する。**文字を削って黙らせない** |
 | `NOTE_TOO_SHORT` | 2 | 母音 30 ms 未満、または子音が入りきらない。拍を増やす / テンポを下げる / モーラを隣へ移す / タイに置き換える |
 | `PITCH_OUT_OF_RANGE` | 2 | 30–2500 Hz (かつサンプルレートの 20 %) を外れた。`transpose` を下げるか `sampleRate` を上げる |
 | `FRONTEND_UNAVAILABLE` | 3 | 日本語フロントエンド (`kanji2koe-openjtalk`) がロードできない。`npm ls kanji2koe-openjtalk` と `kongyoroid doctor --engine formant` を見る。再インストールで直ることが多い |
+| `ENGINE_UNAVAILABLE` `ENGINE_HTTP` `ENGINE_REJECTED` `ENGINE_PROTOCOL` `TIMEOUT` `QUEUE_FULL` | 3 | VOICEVOX 側の失敗 (未起動・HTTP エラー・応答の形が違う・タイムアウト・待ち行列超過)。内蔵エンジンなら `--engine formant` で回避できる。`ENGINE_PROTOCOL` は壊れた WAV を `inspect` したときにも出る |
 | `IO_ERROR` | 4 | 既存ファイルと内容が違う、入力が読めない、書き込み権限がない。**別名で書くのが既定**。`--force` は依頼されたときだけ |
-| `PLAYER_UNAVAILABLE` | 4 | `--play` でシステムプレイヤーが見つからない。ヘッドレス環境では `--play` を付けずに書き出す |
+| `PLAYER_UNAVAILABLE` | 4 | `--play` / `play` でどのプレイヤーでも再生できなかった (`detail.attempts` に各プレイヤーの結果)。ヘッドレス環境では `--play` を付けずに書き出す |
 | `ABORTED` | 130 | SIGINT / `AbortSignal` |
 | `INTERNAL` | 1 | バグ。`error.detail` と再現手順を添えて報告する |
 
-### メッセージの例
+### メッセージの例 (実測)
 
 ```
 INVALID_INPUT   Unknown property.                                   path: $.speedd
                 hint: Allowed properties: kind, schemaVersion, engine, voice, sampleRate, …
 INVALID_INPUT   Expected a finite number in [0.25, 4].              path: $.speed
-INVALID_INPUT   Expected a finite number in [-60, 12].              path: $.gainDb
-INVALID_INPUT   Expected a finite number in [8000, 48000].          path: $.sampleRate
-INVALID_INPUT   Expected a finite number in [0.015625, 64].         path: $.notes[0].beats
-INVALID_INPUT   Expected a string of 1–20000 characters.            path: $.text
 INVALID_INPUT   Give either volume or gainDb, not both.             path: $.gainDb
 INVALID_INPUT   Give either velocity or gainDb, not both.           path: $.notes[1]
 INVALID_INPUT   Lyric "あいうえおかきくけ" has 9 moras; a note holds at most 8.
-INVALID_INPUT   The lyrics have 2 more moras than the melody has pitched notes.
-INVALID_INPUT   A tie or melisma must directly follow a pitched note; it cannot cross a rest.
+INVALID_INPUT   The lyrics have 2 more moras than the melody has pitched notes.   path: $.notes.lyrics
+INVALID_INPUT   A tie (~) must directly follow a pitched note.      path: $.notes.melody[2]
 INVALID_INPUT   Unrecognized reading "wo" in phrase "ハローworld".   path: $.kana[0]
-NOTE_TOO_SHORT  Note n1 (カ) leaves only 6 ms for 1 vowel(s); at least 30 ms are needed.
-NOTE_TOO_SHORT  Note n2 (シュ) is too short for its consonant: 65 ms available, 95 ms needed.
-PITCH_OUT_OF_RANGE  The score spans 8372.0–8518.4 Hz; the engine synthesizes 30–2500 Hz at 24000 Hz.
+INVALID_INPUT   A song needs notes: give --lyrics with --melody, --mml, or --input FILE containing a notes list.   path: $flags.melody
+INVALID_INPUT   cache prune needs --max-bytes N and/or --max-entries N.   path: $flags.max-bytes
+NOTE_TOO_SHORT  Note n1 (カ) leaves only 18 ms for 1 vowel(s); at least 30 ms are needed.   path: $.notes[0].beats
+PITCH_OUT_OF_RANGE  The score spans 8372.0–8518.4 Hz; the engine synthesizes 30–1600 Hz at 8000 Hz.
 IO_ERROR        Refusing to overwrite /work/a.wav: it exists with different content.
 ```
 
@@ -91,8 +89,10 @@ IO_ERROR        Refusing to overwrite /work/a.wav: it exists with different cont
 | `lower-pitch` | `transpose` か最高音を下げる |
 | `raise-sample-rate` | `sampleRate` を上げる |
 | `clamp-pitch` | ピッチを範囲内に丸める |
-| `shorten-input` / `split-input` | 入力を短くする / 分割する |
+| `shorten-input` / `split-input` | 入力を短くする / 分割する (1 リクエスト 1,800 秒の上限など) |
 | `use-force` | `--force` (ライブラリは `force: true`) で置換する |
+| `use-formant-engine` | 内蔵エンジンに切り替える (`plan` / ストリーミングは formant 専用) |
+| `start-engine` / `retry-later` | VOICEVOX を起動する / しばらく待って再送する |
 
 ## 警告と自動調整
 
@@ -102,12 +102,16 @@ IO_ERROR        Refusing to overwrite /work/a.wav: it exists with different cont
 | --- | --- | --- |
 | `ASCII_WORD_UNKNOWN` | advice | レキシコンに無い 5 文字以上の英単語。文字ごとに読まれる。読ませたい語なら辞書に登録する |
 | `URL_READ_LITERALLY` | advice | URL を記号ごと読み下した。ナレーションではたいてい短い説明に置き換えたほうがよい |
+| `EMAIL_READ_LITERALLY` | advice | メールアドレスを記号ごと読み下した。同上 |
 | `HEURISTIC_READING` | advice | フロントエンド無しでかなを機械的に読んだ |
 | `UNREADABLE_TEXT_SKIPPED` | warning | `strictReading: false` で読み飛ばした文字。原稿の欠落なので放置しない |
 | `F0_OUTSIDE_VOICE_RANGE` | warning | ボイスの得意音域外。声質が崩れる。`transpose` かボイス変更 |
 | `CONSONANT_HEAVILY_COMPRESSED` | warning | 子音を 45 % 未満まで短縮した。歌詞が聞き取れなくなる |
+| `PLAN_UNAVAILABLE` | warning | `--plan-out` を VOICEVOX の描画に付けた。音声は書かれるが計画は無い。内蔵エンジンで描画し直す |
+| `CACHE_READ_FAILED` / `CACHE_WRITE_FAILED` | warning | ディスクキャッシュの読み書きに失敗した (描画は成功)。`--cache-dir` の権限を見る |
+| `EXTERNAL_ENGINE_NOT_PROBED` | advice | `validate` が VOICEVOX 向けリクエストの構造だけを検査した (`renderable: "unknown"`) |
 | `CONSONANT_COMPRESSED` | adjustment | 子音を短縮した。`before` / `after` (秒) と `noteId` が付く |
-| `CONSONANT_TAKEN_FROM_NOTE` | adjustment | 子音が前の音符の中に食い込んだ |
+| `CONSONANT_TAKEN_FROM_NOTE` | adjustment | 子音が前に何も無く、音符の中に食い込んだ |
 
 `--diagnostics compact` を付けると 1 行ずつ出る (`speak` 系は標準エラー、`validate` は標準出力):
 
@@ -126,10 +130,9 @@ IO_ERROR        Refusing to overwrite /work/a.wav: it exists with different cont
 | `12件` `23件` | `ジュー/ニ'ケン` | 複合数詞が 2 句に割れる。1 句にしたければ `kana` |
 | `完了しました🎉` | `カンリョー/シマ'_シタ。` | 絵文字は消える。原稿から外すか、意図どおりか確認する |
 | `简体` | `タイ。` | 簡体字専用の字が消える。日本語の字形に直す |
-| `user@example.com` | `ユーエスイーアール、アットマ'ーク、…` | 警告も出ない。読ませたくないなら短い説明に置き換える |
-| `https://example.com/a?b=1` | `…、クエ'_スチョン？ビ'ー/イコール'イチ。` | `?` が疑問文扱いになり文末が上がる |
+| `https://example.com/a?b=1` | `…、クエ'_スチョン？ビ'ー/イコール'イチ。` | `?` が疑問文扱いになり文末が上がる。助言は出るが読み自体は直らない |
 
-**直した結果も壊れることがある。** 辞書は句の切れ方も変え (`サン'ケン/シッパイ` → `サン'ケンシッパイ`)、隣り合う語を両方登録すると語が二重に読まれる (`3件` と `失敗` を同時に登録 → `シッパイシッパイ`)。辞書を足したら `kana` 全体を読み直す。
+**直した結果も壊れることがある。** 辞書は句の切れ方も変える (`3件=サンケン` → `サンケンシ'ッパイ` と後続の語に融合)。辞書を足したら `kana` 全体を読み直し、融合するなら隣の語も登録するか、その文だけ `kana` で書く。詳細は [speech.md](speech.md#辞書の副作用)。
 
 数値は値ごとに読みが変わるので、値が実行時に変わる原稿では 1 度直した `kana` が次の値で壊れる。詳細と対処は [speech.md](speech.md#数字と助数詞)。
 
@@ -138,15 +141,21 @@ IO_ERROR        Refusing to overwrite /work/a.wav: it exists with different cont
 | 症状 | 原因 | 直し方 |
 | --- | --- | --- |
 | `--text` が「引数が曖昧」と言われる | 値が `-` で始まる (`- **完了**` など) | `--text="- **完了**"` の形で渡す |
-| `plan` の `--detail` を指定したのに `phonemes` が出ない | ライブラリで `agent.plan(req, "phonemes")` と書いた。文字列は無視される | `agent.plan(req, { detail: "phonemes" })` |
+| `speak --input req.json` で JSON がそのまま読み上げられる | 2.0 系の挙動。2.1 以降は `{` で始まる入力をリクエスト JSON として扱う | 版を確かめる。`render --input` はどの版でも JSON を受ける |
 | `agent.inspect("out.wav")` が `TypeError` になる | 引数はパスではなく `Uint8Array`、しかも同期関数 | `agent.inspect(new Uint8Array(await readFile("out.wav")))` |
+| `--plan-out` を付けたのに計画ファイルが無い | VOICEVOX の描画 (`PLAN_UNAVAILABLE` 警告) | `--engine formant` で描画する |
 | 出力が書かれない (`written: false`) | 同一内容の no-op | `unchanged: true` なら成功。意図どおり |
 | `IO_ERROR` で止まる | 既存ファイルと内容が違う | 別名で書く。置換を依頼されたときだけ `--force` |
 | 文の切れ目が意図と違う | 文分割は `。！？` と改行が決める。空行は段落として長いポーズになる | `reading` の `sentences[]` で確認し、改行を消すか `、` に置き換える |
+| ストリーミングで最後の断片が出ない | 文末記号が無い断片は入力が閉じるまで待つ | `--flush-ms` (`flushMs`) を付けるか、送信側で `。` を補う |
+| ストリーミングで文が黙って抜ける / 最後に `INVALID_INPUT` (`$.text`) | 読みが得られない文 (絵文字・記号だけ) は一括合成と同じく落ちる。1 文も読めなければ失敗 | `sentence` イベントの `text` で抜けを確認し、原稿側で記号だけの行を消す |
+| `--stream` / `speakStream` で `$flags.kana` `$.kana` | 文ごとに読む仕組みと `kana` は両立しない | 読みは `--dict-entry` / `dictionary` で与えるか、`--stream` を外して全文を `kana` で読む |
 | 1 回あたり 0.7 秒前後かかる | CLI 起動ごとにフロントエンドをロードしている | `batch --input -` かライブラリでプロセスを使い回す |
 | 更新後も古い音声が返る気がする | キャッシュキーに版と辞書ダイジェストが入るので起こらない | 切り分けたいなら `--no-cache` |
+| `cache prune` が何もしない / エラーになる | `--max-bytes` か `--max-entries` が要る | どちらかを付ける。`--dry-run` で `wouldRemove` を先に見る |
 | 音が割れる | リミッターが働いている | `limitedSamples` を見て `gainDb` を下げる (範囲 −60..12) |
 | 生成のたびに音が変わる | 起きない。同じリクエスト・同じ `seed`・同じ版なら `sha256` は同一 | 変わったなら `requestHash` を比べて差分を探す |
+| `play` が `IO_ERROR` | ファイルが無い / 読めない | パスを確認する。プレイヤーの問題なら `PLAYER_UNAVAILABLE` になる |
 
 ## 切り分けの手順
 

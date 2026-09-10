@@ -202,6 +202,7 @@ export class DiskCache implements RenderCache {
   public async prune(
     maxBytes: number | undefined = this.maxBytes,
     maxEntries: number | undefined = this.maxEntries,
+    dryRun: boolean = false,
   ): Promise<number> {
     const entries = (await this.entries()).filter((entry) => entry.mtime > 0).sort((a, b) => a.mtime - b.mtime);
     let bytes = 0;
@@ -213,7 +214,7 @@ export class DiskCache implements RenderCache {
       const overCount = maxEntries !== undefined && count > maxEntries;
       if (!overBytes && !overCount) break;
       try {
-        await unlink(entry.path);
+        if (!dryRun) await unlink(entry.path);
         removed += 1;
         bytes -= entry.bytes;
         count -= 1;

@@ -44,6 +44,10 @@ test("URLs and emails are read symbol by symbol with an advice diagnostic", () =
   assert.equal(result.text, "example ドット com スラッシュ pathを開く");
   assert.equal(result.diagnostics[0]?.code, "URL_READ_LITERALLY");
   assert.equal(norm("test@example.com"), "test アットマーク example ドット com");
+  const email = normalizeForReading("連絡はtest@example.comへ");
+  assert.equal(email.diagnostics[0]?.code, "EMAIL_READ_LITERALLY");
+  assert.equal(email.diagnostics[0]?.surface, "test@example.com");
+  assert.deepEqual(email.diagnostics[0]?.sourceSpan, { start: 3, end: 19, unit: "unicode-code-point" });
 });
 
 test("markdown markers, spaces between Japanese, and newlines are normalized", () => {
@@ -107,4 +111,15 @@ test("splitSentences keeps terminals, handles decimals and paragraphs", () => {
     ],
   );
   assert.deepEqual(pieces[1]?.sourceSpan, { start: 6, end: 14, unit: "unicode-code-point" });
+  const quoted = splitSentences("「やった！」と言った。彼は（本当？）と聞いた。終わり。」");
+  assert.deepEqual(
+    quoted.map((p) => [p.text, p.terminal]),
+    [
+      ["「やった！」", "！"],
+      ["と言った。", "。"],
+      ["彼は（本当？）", "？"],
+      ["と聞いた。", "。"],
+      ["終わり。」", "。"],
+    ],
+  );
 });

@@ -5,6 +5,7 @@ const RIFF = 0x52494646;
 const WAVE = 0x57415645;
 const FMT = 0x666d7420;
 const DATA = 0x64617461;
+export const STREAMING_LENGTH: number = 0xffffffff;
 
 export interface WavLayout extends AudioInfo {
   readonly dataOffset: number;
@@ -68,10 +69,7 @@ export function inspectWav(bytes: Uint8Array): WavLayout {
   if (bytes.byteLength < 44) malformed("shorter than a RIFF header");
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (view.getUint32(0) !== RIFF || view.getUint32(8) !== WAVE) malformed("missing RIFF/WAVE signature");
-  const declared = view.getUint32(4, true) + 8;
-  if (declared > bytes.byteLength)
-    malformed(`RIFF declares ${declared} bytes but only ${bytes.byteLength} were received`);
-  const end = declared;
+  const end = Math.min(view.getUint32(4, true) + 8, bytes.byteLength);
   let format = 0;
   let channels = 0;
   let rate = 0;
@@ -82,8 +80,9 @@ export function inspectWav(bytes: Uint8Array): WavLayout {
   let position = 12;
   while (position + 8 <= end) {
     const tag = view.getUint32(position);
-    const length = view.getUint32(position + 4, true);
     const start = position + 8;
+    const declared = view.getUint32(position + 4, true);
+    const length = tag === DATA && declared === STREAMING_LENGTH ? end - start : declared;
     if (tag === FMT) {
       if (format !== 0 || length < 16 || start + 16 > end) malformed("bad fmt chunk");
       format = view.getUint16(start, true);
@@ -91,7 +90,10 @@ export function inspectWav(bytes: Uint8Array): WavLayout {
       rate = view.getUint32(start + 4, true);
       align = view.getUint16(start + 12, true);
       bits = view.getUint16(start + 14, true);
-      if (format === 0xfffe && length >= 26) format = view.getUint16(start + 24, true);
+      if (format === 0xfffe) {
+        if (length < 26 || start + 26 > end) malformed("bad fmt chunk");
+        format = view.getUint16(start + 24, true);
+      }
     } else if (tag === DATA) {
       if (dataOffset >= 0) malformed("duplicate data chunk");
       if (start + length > end) malformed(`data chunk declares ${length} bytes past the end of the file`);

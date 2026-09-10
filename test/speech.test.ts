@@ -123,3 +123,31 @@ test("phonological context rules change the acoustic plan", async () => {
   const long = await plan({ kana: "オーサカ" });
   assert.equal(long.segments.filter((segment) => segment.phoneme === "o")[1]?.articulation, "continue");
 });
+
+test("the F0 range and contour of long speech match the reference model, in linear time", async () => {
+  const planned = await plan({ kana: "コンニチワ'/セカ'イ？_シツ'モン、デ_ス。" });
+  let expectedMin = Infinity;
+  let expectedMax = 0;
+  for (const segment of planned.segments) {
+    if (!segment.voiced) continue;
+    for (const point of planned.pitch) {
+      if (point.sample < segment.start || point.sample > segment.end) continue;
+      expectedMin = Math.min(expectedMin, point.hz);
+      expectedMax = Math.max(expectedMax, point.hz);
+    }
+  }
+  assert.ok(Math.abs(planned.f0Min - expectedMin) < 1, `${planned.f0Min} vs ${expectedMin}`);
+  assert.ok(Math.abs(planned.f0Max - expectedMax) < 1, `${planned.f0Max} vs ${expectedMax}`);
+  const phrases = (count: number): string => `${Array.from({ length: count }, () => "コンニチワ'").join("/")}。`;
+  const started = performance.now();
+  const small = await plan({ kana: phrases(200) });
+  const smallMs = performance.now() - started;
+  const middle = performance.now();
+  const large = await plan({ kana: phrases(1600) });
+  const largeMs = performance.now() - middle;
+  assert.equal(large.moras.length, small.moras.length * 8);
+  assert.ok(
+    largeMs < Math.max(2000, smallMs * 24),
+    `200 phrases: ${smallMs.toFixed(0)} ms, 1600 phrases: ${largeMs.toFixed(0)} ms`,
+  );
+});

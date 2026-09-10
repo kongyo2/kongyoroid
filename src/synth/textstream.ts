@@ -1,7 +1,9 @@
 import type { Diagnostic } from "../errors.ts";
-import { checkAbort } from "../errors.ts";
+import { KongyoroidError, aborted, checkAbort } from "../errors.ts";
 import { LIMITS } from "../limits.ts";
+import { isNothingReadable } from "../text/frontend.ts";
 import type { BoundaryKind } from "../text/notation.ts";
+import { isSentenceCloser } from "../text/sentences.ts";
 import type { ResolvedSpeech } from "../types.ts";
 import type { CompileOptions } from "./engine.ts";
 import { compileRequest } from "./engine.ts";
@@ -36,6 +38,7 @@ const TERMINALS = /[。！？!?\n]/u;
 export function takeSentences(
   buffer: string,
   maxChars: number,
+  complete: boolean = true,
 ): { readonly sentences: string[]; readonly rest: string } {
   const sentences: string[] = [];
   let rest = buffer;
@@ -52,12 +55,39 @@ export function takeSentences(
       break;
     }
     let end = match.index + match[0].length;
-    while (end < rest.length && TERMINALS.test(rest[end] ?? "")) end += 1;
+    while (end < rest.length && (TERMINALS.test(rest[end] ?? "") || isSentenceCloser(rest[end] ?? ""))) end += 1;
+    if (end >= rest.length && !complete) break;
     const sentence = rest.slice(0, end);
     rest = rest.slice(end);
     if (sentence.trim().length > 0) sentences.push(sentence);
   }
   return { sentences, rest };
+}
+
+function nextChunk<T>(pending: Promise<T>, waitMs: number | undefined, signal?: AbortSignal): Promise<T | undefined> {
+  if (waitMs === undefined && signal === undefined) return pending;
+  let timer: NodeJS.Timeout | undefined;
+  let onAbort: (() => void) | undefined;
+  const interrupt = new Promise<undefined>((resolve, reject) => {
+    if (signal?.aborted === true) {
+      reject(aborted("Streaming cancelled."));
+      return;
+    }
+    if (waitMs !== undefined) timer = setTimeout(() => resolve(undefined), waitMs);
+    if (signal !== undefined) {
+      onAbort = (): void => reject(aborted("Streaming cancelled."));
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+  });
+  return Promise.race([pending, interrupt]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+    if (onAbort !== undefined) signal?.removeEventListener("abort", onAbort);
+  });
+}
+
+function observed<T>(promise: Promise<T>): Promise<T> {
+  promise.catch(() => undefined);
+  return promise;
 }
 
 function lastPauseIndex(chars: readonly string[], maxChars: number): number {
@@ -86,7 +116,8 @@ export async function* synthesizeTextStream(
   let frames = 0;
   let lastBoundary: BoundaryKind | undefined;
   let lastParagraphEnd = false;
-  let pendingPlan: Promise<SynthesisPlan> | undefined;
+  let pendingPlan: Promise<SynthesisPlan | undefined> | undefined;
+  let unreadable: KongyoroidError | undefined;
   const leadPause = (): number => {
     if (lastBoundary === undefined) return request.prePause;
     return Math.max(
@@ -94,13 +125,21 @@ export async function* synthesizeTextStream(
       boundaryPauseSeconds(lastBoundary, timing, lastParagraphEnd) - utteranceFinalPauseSeconds(lastBoundary, timing),
     );
   };
-  const compile = (text: string): Promise<SynthesisPlan> =>
-    compileRequest({ ...request, text, prePause: leadPause(), postPause: 0 }, sampleRate, options).then(
-      (compiled) => compiled.plan,
+  const compile = (text: string): Promise<SynthesisPlan | undefined> =>
+    observed(
+      compileRequest({ ...request, text, prePause: leadPause(), postPause: 0 }, sampleRate, options).then(
+        (compiled) => compiled.plan,
+        (error: unknown) => {
+          if (!isNothingReadable(error)) throw error;
+          unreadable = error;
+          return undefined;
+        },
+      ),
     );
   const emit = async function* (text: string): AsyncGenerator<TextStreamEvent, void, void> {
     const plan = await (pendingPlan ?? compile(text));
     pendingPlan = undefined;
+    if (plan === undefined) return;
     lastBoundary = plan.reading?.phrases.at(-1)?.boundary ?? "sentence";
     lastParagraphEnd = plan.reading?.sentences.at(-1)?.paragraphEnd ?? false;
     const startFrame = frames;
@@ -128,25 +167,67 @@ export async function* synthesizeTextStream(
     index += 1;
   };
   const queue: string[] = [];
-  for await (const chunk of chunks) {
-    checkAbort(options.signal);
-    buffer += chunk;
-    const taken = takeSentences(buffer, maxChars);
-    buffer = taken.rest;
-    queue.push(...taken.sentences);
-    while (queue.length > 0) {
-      const text = queue.shift();
-      if (text === undefined) break;
-      const following = queue[0];
-      yield* emit(text);
-      if (following !== undefined) pendingPlan = compile(following);
+  const flushMs = options.flushMs !== undefined && options.flushMs > 0 ? options.flushMs : undefined;
+  const iterator = chunks[Symbol.asyncIterator]();
+  let arrivedAt = performance.now();
+  const read = (): Promise<IteratorResult<string, void>> =>
+    observed(
+      iterator.next().then((result) => {
+        arrivedAt = performance.now();
+        return result;
+      }),
+    );
+  let pending: Promise<IteratorResult<string, void>> | undefined;
+  let exhausted = false;
+  let lastInputAt = arrivedAt;
+  try {
+    while (!exhausted) {
+      checkAbort(options.signal);
+      pending ??= read();
+      const waitMs =
+        flushMs !== undefined && buffer.trim().length > 0
+          ? Math.max(0, flushMs - (performance.now() - lastInputAt))
+          : undefined;
+      const result = await nextChunk(pending, waitMs, options.signal);
+      if (result === undefined) {
+        const text = buffer;
+        buffer = "";
+        pendingPlan = undefined;
+        yield* emit(text);
+        continue;
+      }
+      pending = undefined;
+      if (result.done === true) {
+        exhausted = true;
+        break;
+      }
+      lastInputAt = arrivedAt;
+      buffer += result.value;
+      pending = read();
+      const taken = takeSentences(buffer, maxChars, false);
+      buffer = taken.rest;
+      queue.push(...taken.sentences);
+      while (queue.length > 0) {
+        const text = queue.shift();
+        if (text === undefined) break;
+        const following = queue[0];
+        yield* emit(text);
+        if (following !== undefined) pendingPlan = compile(following);
+      }
+    }
+  } finally {
+    if (!exhausted) {
+      const closing = iterator.return?.();
+      if (options.signal?.aborted === true || pending !== undefined) closing?.catch(() => undefined);
+      else await closing;
     }
   }
-  const tail = buffer.trim();
-  if (tail.length > 0) {
+  const tail = takeSentences(buffer, maxChars);
+  for (const text of tail.rest.trim().length > 0 ? [...tail.sentences, tail.rest] : tail.sentences) {
     pendingPlan = undefined;
-    yield* emit(tail);
+    yield* emit(text);
   }
+  if (index === 0 && unreadable !== undefined) throw unreadable;
   const trailingFrames = index === 0 ? 0 : Math.round(request.postPause * sampleRate);
   if (trailingFrames > 0) {
     checkAbort(options.signal);

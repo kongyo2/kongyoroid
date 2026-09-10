@@ -11,10 +11,16 @@ export interface CliResult {
 
 export const CLI_PATH: string = fileURLToPath(new URL("../../src/cli.ts", import.meta.url));
 
+export interface TimedChunk {
+  readonly text: string;
+  readonly afterMs: number;
+}
+
 export function runCli(
   args: readonly string[],
   options: {
     readonly input?: string | Buffer;
+    readonly inputChunks?: readonly TimedChunk[];
     readonly env?: Readonly<Record<string, string>>;
     readonly cwd?: string;
   } = {},
@@ -34,7 +40,21 @@ export function runCli(
       const stdoutBytes = Buffer.concat(out);
       resolve({ code, stdout: stdoutBytes.toString("utf8"), stderr: Buffer.concat(err).toString("utf8"), stdoutBytes });
     });
-    if (options.input !== undefined) child.stdin.end(options.input);
+    if (options.inputChunks !== undefined) {
+      const chunks = [...options.inputChunks];
+      const feed = (): void => {
+        const next = chunks.shift();
+        if (next === undefined) {
+          child.stdin.end();
+          return;
+        }
+        setTimeout(() => {
+          child.stdin.write(next.text);
+          feed();
+        }, next.afterMs);
+      };
+      feed();
+    } else if (options.input !== undefined) child.stdin.end(options.input);
     else child.stdin.end();
   });
 }

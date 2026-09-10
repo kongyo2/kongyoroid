@@ -58,6 +58,8 @@ test("DiskCache owns a namespace, never deletes unrelated files, and prunes by s
     assert.equal(await readFile(join(disk.directory, "stray.txt"), "utf8"), "also keep");
     await disk.set(keyA, new Uint8Array(2000));
     await disk.set(keyB, new Uint8Array(2000));
+    assert.equal(await disk.prune(3000, undefined, true), 1);
+    assert.equal((await disk.stats()).entries, 2);
     assert.equal(await disk.prune(3000), 1);
     assert.equal((await disk.stats()).entries, 1);
   } finally {

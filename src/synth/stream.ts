@@ -1,6 +1,6 @@
 import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import { checkAbort } from "../errors.ts";
-import { encodePcm16, wavHeader } from "../wav.ts";
+import { STREAMING_LENGTH, encodePcm16, wavHeader } from "../wav.ts";
 import type { RenderStats } from "./renderer.ts";
 import { PlanRenderer } from "./renderer.ts";
 import type { SynthesisPlan } from "./plan.ts";
@@ -100,7 +100,7 @@ export function pcm16Bytes(block: Float32Array): Uint8Array {
 export function streamingWavHeader(sampleRate: number, channels: number = 1): Uint8Array {
   const header = wavHeader(0, sampleRate, channels);
   const view = new DataView(header.buffer);
-  view.setUint32(4, 0xffffffff, true);
-  view.setUint32(40, 0xffffffff, true);
+  view.setUint32(4, STREAMING_LENGTH, true);
+  view.setUint32(40, STREAMING_LENGTH, true);
   return header;
 }
